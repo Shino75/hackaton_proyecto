@@ -1,17 +1,18 @@
 // lib/models/paciente.dart
 
 class Paciente {
-  // Estos campos reflejan los datos permanentes del paciente.
-
-  String nombre;
-  String apellidoPaterno;
-  DateTime fechaNacimiento;
-  String genero;
-  String curp;
-  String contactoTelefono;
-  String direccionCompleta;
+  // Coincide con tabla: pacientes
+  int? idPaciente; // serial
+  String nombre; // varchar(100)
+  String apellidoPaterno; // varchar(100)
+  DateTime fechaNacimiento; // date
+  String genero; // char(1) -> 'M', 'F'
+  String curp; // varchar(18)
+  String contactoTelefono; // varchar(15)
+  String direccionCompleta; // varchar(255)
 
   Paciente({
+    this.idPaciente,
     required this.nombre,
     required this.apellidoPaterno,
     required this.fechaNacimiento,
