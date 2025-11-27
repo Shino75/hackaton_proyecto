@@ -1,7 +1,7 @@
 // lib/main.dart
 
 import 'package:flutter/material.dart';
-// Importa la pantalla de formulario que contiene todo
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'screens/paciente_form_screen.dart'; 
 
 void main() {
@@ -18,7 +18,9 @@ class MyApp extends StatelessWidget {
       title: 'Sistema de Triage Médico',
       // Configuración de Localización para Español
       localizationsDelegates: const [
-        // Se pueden añadir más delegados si es necesario
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
       ],
       supportedLocales: const [
         Locale('en', 'US'), 
