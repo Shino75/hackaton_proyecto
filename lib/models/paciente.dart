@@ -1,7 +1,7 @@
 // lib/models/paciente.dart
 
 class Paciente {
-  // id_paciente es serial, se generaría en la BD, no lo incluimos en el formulario.
+  // Estos campos reflejan los datos permanentes del paciente.
 
   String nombre;
   String apellidoPaterno;
@@ -10,7 +10,6 @@ class Paciente {
   String curp;
   String contactoTelefono;
   String direccionCompleta;
-  
 
   Paciente({
     required this.nombre,
