@@ -5,7 +5,6 @@ class HospitalRepository {
   final DbService _dbService = DbService();
 
   // --- 1. ENFERMERA: REGISTRAR INGRESO (CON SOPORTE PARA LABORATORIO) ---
-  // (Este método se queda exactamente igual a como lo tenías)
   Future<void> registrarIngreso(Map<String, dynamic> datos) async {
     final conn = await _dbService.getConnection();
     
@@ -76,7 +75,7 @@ class HospitalRepository {
           var valor = datos[keyFormulario];
 
           if (valor != null && valor.toString().trim().isNotEmpty) {
-             await session.execute(
+              await session.execute(
               Sql.named("""
                 INSERT INTO resultados_lab (
                   id_episodio, nombre_estudio, valor_resultado, fecha_toma, documento_enlace
@@ -364,5 +363,87 @@ class HospitalRepository {
         );
       }
     });
+  }
+  
+  // --------------------------------------------------------------------------
+  // --- 4. ADMINISTRADOR: OBTENER LISTA DE PERSONAL (PARA DIRECTORIO) [FIXED]
+  // --------------------------------------------------------------------------
+  Future<List<Map<String, dynamic>>> getRegisteredStaff() async {
+    final conn = await _dbService.getConnection();
+
+    // FIX: Se usa COALESCE para evitar que la concatenación de nombre falle si algún campo es NULL.
+    // FIX: Se usa rol = 'doctor' en lugar de 'medico' para coincidir con la app.
+    final result = await conn.execute(
+      Sql.named("""
+        SELECT 
+          id_usuario, 
+          COALESCE(nombre, '') || ' ' || COALESCE(apellido_paterno, '') || ' ' || COALESCE(apellido_materno, '') AS nombre_completo, 
+          email, 
+          rol, 
+          cedula_profesional 
+        FROM usuarios
+        WHERE rol = 'doctor' OR rol = 'enfermera'  
+        ORDER BY rol, nombre_completo
+      """),
+    );
+
+    if (result.isEmpty) return [];
+
+    return result.map((row) => {
+      'id': row[0],
+      'nombre': row[1], // Nombre completo concatenado
+      'email': row[2],
+      'rol': row[3],
+      'cedula': row[4],
+    }).toList();
+  }
+  
+  // --------------------------------------------------------------------------
+  // --- 5. ADMINISTRADOR: REGISTRAR NUEVO DOCTOR/ENFERMERA [FIXED]
+  // --------------------------------------------------------------------------
+  Future<void> registrarUsuario(Map<String, dynamic> datos) async {
+    final conn = await _dbService.getConnection();
+
+    final rol = datos['rol'].toLowerCase();
+
+    try {
+      // FIXES: Se usan los nombres de columna correctos (minúsculas, guiones bajos correctos) 
+      // y se eliminó la columna 'estado' que no existía.
+      await conn.execute(
+        Sql.named("""
+          INSERT INTO usuarios (
+            nombre, apellido_paterno, apellido_materno, curp, fecha_nacimiento, genero, 
+            telefono, domicilio, especialidad, email, password_hash, rol, 
+            cedula_profesional, firma_digital, fecha_creacion
+          )
+          VALUES (
+            @nombre, @apellido_paterno, @apellido_materno, @curp, @fecha_nacimiento, @genero,
+            @telefono, @domicilio, @especialidad, @email, @password_hash, @rol, 
+            @cedula, @firma_digital, NOW()
+          )
+        """),
+        parameters: {
+          // Valores protegidos contra NULL y para manejar VARCHAR(1) del género
+          'nombre': datos['nombre'] ?? '',
+          'apellido_paterno': datos['apellido_paterno'] ?? '',
+          'apellido_materno': datos['apellido_materno'] ?? '', 
+          'curp': datos['curp'] ?? '',
+          'fecha_nacimiento': DateTime.tryParse(datos['fecha_nacimiento'] ?? '') ?? DateTime(1900), 
+          'genero': datos['genero'] ?? '',
+          'telefono': datos['telefono'] ?? '',
+          'domicilio': datos['domicilio'] ?? '',
+          'especialidad': rol == 'doctor' ? (datos['especialidad'] ?? '') : '', 
+          'email': datos['email'] ?? '',
+          'password_hash': datos['password'] ?? '',
+          'rol': rol,
+          'cedula': datos['cedula'] ?? '', 
+          'firma_digital': datos['firma'] ?? '',
+        },
+      );
+      print("✅ Usuario $rol registrado con éxito: ${datos['email']}");
+
+    } catch (e) {
+      throw Exception('Error de base de datos al guardar usuario: ${e.toString()}');
+    }
   }
 }
