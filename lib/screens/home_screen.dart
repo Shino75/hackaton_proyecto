@@ -1,4 +1,8 @@
+// lib/screens/home_screen.dart (REEMPLAZAR CONTENIDO COMPLETO)
+
 import 'package:flutter/material.dart';
+// Importación corregida (solo necesitas importar el repositorio)
+import '../services/hospital_repository.dart'; 
 
 class AdminManagementScreen extends StatefulWidget {
   const AdminManagementScreen({super.key});
@@ -11,6 +15,12 @@ class _AdminManagementScreenState extends State<AdminManagementScreen> with Sing
   
   late TabController _tabController;
   
+  // --- ESTADO Y REPOSITORIO PARA DIRECTORIO ---
+  final HospitalRepository _repository = HospitalRepository(); 
+  List<Map<String, dynamic>> _staffList = []; 
+  bool _isLoadingStaff = false; 
+  // -------------------------------------------
+
   // Claves de formulario
   final GlobalKey<FormState> _doctorFormKey = GlobalKey<FormState>();
   final GlobalKey<FormState> _nurseFormKey = GlobalKey<FormState>();
@@ -26,9 +36,48 @@ class _AdminManagementScreenState extends State<AdminManagementScreen> with Sing
 
   // Definición de Colores Azules
   final Color _appBarColor = Colors.indigo;
-  final Color _doctorPrimaryColor = Colors.blue[800]!; // Azul fuerte para Doctor
-  final Color _nursePrimaryColor = Colors.cyan[800]!; // Azul verdoso para Enfermera
+  final Color _doctorPrimaryColor = Colors.blue[800]!; 
+  final Color _nursePrimaryColor = Colors.cyan[800]!; 
   final Color _directoryColor = Colors.blue; 
+
+
+  // --- MÉTODO DE CARGA DE DATOS REAL DE DB ---
+  Future<void> _loadStaffData() async {
+    if (_isLoadingStaff) return; 
+
+    setState(() {
+      _isLoadingStaff = true;
+      _staffList = []; 
+    });
+    
+    try {
+      // Intenta obtener la lista de personal de la DB
+      final data = await _repository.getRegisteredStaff(); 
+      
+      setState(() {
+        _staffList = data;
+        _isLoadingStaff = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoadingStaff = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Error al cargar personal: $e. Verifique la conexión a PostgreSQL y los nombres de columnas.'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 8),
+        ),
+      );
+    }
+  }
+
+  // --- MÉTODO AUXILIAR PARA ABREVIAR GÉNERO (FIX para VARCHAR(1)) ---
+  String _getGenderAbbreviation(String gender) {
+    if (gender.isEmpty) return '';
+    // Toma la primera letra en mayúsculas: 'Masculino' -> 'M'
+    return gender[0].toUpperCase(); 
+  }
 
 
   @override
@@ -36,9 +85,11 @@ class _AdminManagementScreenState extends State<AdminManagementScreen> with Sing
     super.initState();
     _tabController = TabController(length: 4, vsync: this); 
 
-    // Definición de controladores comunes y nuevos campos
+    _loadStaffData(); 
+    
+    // Definición de controladores 
     final Map<String, TextEditingController> baseControllers = {
-      'nombre': TextEditingController(),
+      'nombre': TextEditingController(), 
       'apellido_paterno': TextEditingController(),
       'apellido_materno': TextEditingController(),
       'email': TextEditingController(),
@@ -52,9 +103,15 @@ class _AdminManagementScreenState extends State<AdminManagementScreen> with Sing
       'domicilio': TextEditingController(),
     };
 
-    // Controladores específicos por rol
     _doctorControllers = {...baseControllers, 'especialidad': TextEditingController()};
     _nurseControllers = {...baseControllers, 'area_especializacion': TextEditingController()};
+    
+    _tabController.addListener(() {
+      // Recarga el directorio cuando se selecciona la pestaña 'Directorio'
+      if (_tabController.index == 3 && !_isLoadingStaff) { 
+        _loadStaffData();
+      }
+    });
   }
 
   @override
@@ -66,32 +123,74 @@ class _AdminManagementScreenState extends State<AdminManagementScreen> with Sing
     super.dispose();
   }
 
-  // --- Método de Simulación de Guardado/Actualización ---
-  void _saveUser(String role, GlobalKey<FormState> formKey, Map<String, TextEditingController> controllers) {
+  // --- MÉTODO _saveUser ACTUALIZADO para guardar en DB ---
+  void _saveUser(String role, GlobalKey<FormState> formKey, Map<String, TextEditingController> controllers) async {
     if (formKey.currentState!.validate()) {
-      final userData = {
-        'Rol': role,
-        'Nombre Completo': '${controllers['nombre']!.text} ${controllers['apellido_paterno']!.text} ${controllers['apellido_materno']!.text}',
-        'CURP': controllers['curp']!.text,
-        'Cédula/Matrícula': controllers['cedula']!.text,
-        'Especialidad/Área': controllers[role == 'Doctor' ? 'especialidad' : 'area_especializacion']!.text,
+      
+      // OBTENEMOS EL GÉNERO ABREVIADO
+      final String abbreviatedGender = _getGenderAbbreviation(controllers['genero']!.text);
+
+      // 1. Recolectar datos del formulario
+      final Map<String, dynamic> userData = {
+        'rol': role,
+        'nombre': controllers['nombre']!.text,
+        'apellido_paterno': controllers['apellido_paterno']!.text,
+        'apellido_materno': controllers['apellido_materno']!.text,
+
+        // CAMPOS PERSONALES 
+        'curp': controllers['curp']!.text,
+        'fecha_nacimiento': controllers['fecha_nacimiento']!.text,
+        'genero': abbreviatedGender, // <-- USA LA ABREVIATURA
+        'telefono': controllers['telefono']!.text,
+        'domicilio': controllers['domicilio']!.text,
+        
+        // DATOS DE ACCESO
+        'email': controllers['email']!.text,
+        'password': controllers['password']!.text, 
+        'cedula': controllers['cedula']!.text,
+        
+        // CAMPOS CONDICIONALES/OPCIONALES: Usamos ?.text ?? '' para evitar null
+        'firma': controllers['firma']?.text ?? '', 
+        'especialidad': controllers['especialidad']?.text ?? '', 
+        'area_especializacion': controllers['area_especializacion']?.text ?? '', 
       };
       
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('✅ Expediente COMPLETO de $role guardado con éxito. Datos clave: ${userData.toString()}'),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 5),
-        ),
-      );
-      formKey.currentState!.reset();
-      setState(() {
-         controllers['genero']!.text = _generoOpciones.first;
-      });
+      // 2. Intentar guardar en la base de datos
+      try {
+        await _repository.registrarUsuario(userData);
+
+        // Éxito:
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Expediente COMPLETO de $role registrado con éxito: ${userData['email']}'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+
+        // Resetear el formulario 
+        formKey.currentState!.reset();
+        setState(() {
+           controllers['genero']!.text = _generoOpciones.first;
+        });
+        
+        // <--- CORRECCIÓN CLAVE: Esperar a que los datos se recarguen completamente.
+        await _loadStaffData(); 
+
+      } catch (e) {
+        // Error (ej: conexión fallida, email/cédula duplicada en la DB)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error al registrar $role. Posiblemente cédula/email duplicado o fallo de conexión: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 8),
+          ),
+        );
+      }
     }
   }
 
-  // --- Método de Simulación de Baja/Desactivación ---
+  // --- Widget de Gestión de BAJAS (Se mantiene igual) ---
   void _deactivateUser() {
     final identifier = _searchController.text.trim();
 
@@ -112,10 +211,11 @@ class _AdminManagementScreenState extends State<AdminManagementScreen> with Sing
       ),
     );
     _searchController.clear();
+    _loadStaffData();
   }
 
 
-  // --- Widget del Formulario de CREACIÓN (Reutilizable con más campos) ---
+  // --- Widget del Formulario de CREACIÓN (Se mantiene igual) ---
   Widget _buildUserForm({required String role, required GlobalKey<FormState> formKey, required Map<String, TextEditingController> controllers}) {
     final Color primaryColor = role == 'Doctor' ? _doctorPrimaryColor : _nursePrimaryColor;
 
@@ -209,7 +309,6 @@ class _AdminManagementScreenState extends State<AdminManagementScreen> with Sing
     );
   }
 
-  // --- Widget de Gestión de BAJAS ---
   Widget _buildDeactivationForm() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20.0),
@@ -243,7 +342,6 @@ class _AdminManagementScreenState extends State<AdminManagementScreen> with Sing
             icon: const Icon(Icons.warning_amber),
             label: const Text('Dar de Baja / Desactivar Usuario'),
             style: ElevatedButton.styleFrom(
-              // Usamos el color rojo para indicar una acción destructiva/de advertencia
               backgroundColor: Colors.red[700], 
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 15),
@@ -261,53 +359,83 @@ class _AdminManagementScreenState extends State<AdminManagementScreen> with Sing
     );
   }
 
-  // --- Widget de Directorio de Personal (NUEVA PESTAÑA) ---
+  // --- Widget de Directorio de Personal (MUESTRA LA LISTA REAL) ---
   Widget _buildDirectoryScreen() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Icon(
-              Icons.people_outline,
-              size: 80,
-              color: _directoryColor, // Usamos el color del directorio
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Text(
+            'Directorio de Personal Registrado (${_staffList.length})',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: _directoryColor),
+          ),
+        ),
+        
+        if (_isLoadingStaff)
+          const Padding(
+            padding: EdgeInsets.all(20.0),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (_staffList.isEmpty)
+          Center(
+            child: Column(
+              children: [
+                const SizedBox(height: 50),
+                const Text('No hay Médicos ni Enfermeras registrados en la BD.', style: TextStyle(fontSize: 16)),
+                const SizedBox(height: 20),
+                ElevatedButton.icon(
+                  onPressed: _loadStaffData,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Intentar Recargar Datos'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _directoryColor,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 20),
-            const Text(
-              'Directorio de Personal Registrado',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'Aquí se mostraría la lista completa y paginada de todos los Médicos y Enfermeras registrados en la base de datos (Ejemplo: Nombre, Cédula, Especialidad).',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 16, color: Colors.black54),
-            ),
-            const SizedBox(height: 30),
-            ElevatedButton.icon(
-              onPressed: () {
-                // Simulación: aquí se haría la llamada a la DB
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Cargando datos del directorio... (Simulación)'),
-                    backgroundColor: Colors.blue,
+          )
+        else
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              itemCount: _staffList.length,
+              itemBuilder: (context, index) {
+                final staff = _staffList[index];
+                final isDoctor = staff['rol'] == 'medico';
+                final primaryColor = isDoctor ? _doctorPrimaryColor : _nursePrimaryColor;
+
+                return Card(
+                  elevation: 1,
+                  margin: const EdgeInsets.only(bottom: 10),
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: primaryColor,
+                      // Muestra la primera letra del nombre
+                      child: Text(staff['nombre'] != null && staff['nombre'].isNotEmpty ? staff['nombre'][0] : '?', style: const TextStyle(color: Colors.white)),
+                    ),
+                    title: Text(
+                      staff['nombre'] ?? 'Nombre no disponible',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Text(
+                      'Rol: ${staff['rol'].toUpperCase()} | Cédula: ${staff['cedula'] ?? 'N/D'}',
+                    ),
+                    trailing: Icon(
+                      isDoctor ? Icons.local_hospital : Icons.medical_services,
+                      color: primaryColor,
+                    ),
+                    onTap: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Email: ${staff['email']}')),
+                      );
+                    },
                   ),
                 );
               },
-              icon: const Icon(Icons.list),
-              label: const Text('Cargar Listado Completo'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _directoryColor,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
-              ),
             ),
-          ],
-        ),
-      ),
+          ),
+      ],
     );
   }
 
@@ -455,8 +583,11 @@ class _AdminManagementScreenState extends State<AdminManagementScreen> with Sing
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: BackButton(
+          color: Colors.white,
+        ),
         title: const Text('⚙️ Panel de Administración de Usuarios'),
-        backgroundColor: _appBarColor, // Color de barra de aplicación azul
+        backgroundColor: _appBarColor, 
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: Colors.white,
@@ -471,13 +602,9 @@ class _AdminManagementScreenState extends State<AdminManagementScreen> with Sing
       body: TabBarView(
         controller: _tabController,
         children: [
-          // Pestaña 1: Doctor
           _buildUserForm(role: 'Doctor', formKey: _doctorFormKey, controllers: _doctorControllers),
-          // Pestaña 2: Enfermera
           _buildUserForm(role: 'Enfermera', formKey: _nurseFormKey, controllers: _nurseControllers),
-          // Pestaña 3: Gestión de Bajas
           _buildDeactivationForm(), 
-          // Pestaña 4: Directorio
           _buildDirectoryScreen(), 
         ],
       ),
