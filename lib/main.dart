@@ -4,9 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart'; 
 import 'screens/login_screen.dart';
 
-
-
-
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
@@ -18,8 +15,9 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false, // <--- ESTA ES LA LÍNEA QUE LO QUITA
       title: 'Sistema de Triage Médico',
-      // Configuración de Localización para Español
+      // ... resto de tu configuración ...
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -34,9 +32,7 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
       ),
-      
-      // La pantalla de formulario es la inicial
-      home: const LoginScreen(), // <--- AHORA ARRANCAMOS AQUÍ
+      home: const LoginScreen(), 
     );
   }
 }

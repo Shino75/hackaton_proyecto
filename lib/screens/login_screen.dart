@@ -57,7 +57,7 @@ class _LoginScreenState extends State<LoginScreen> {
         // Si es Admin u otro, lo mandamos al menú general
         Navigator.pushReplacement(
           context, 
-          MaterialPageRoute(builder: (_) => const HomeScreen())
+          MaterialPageRoute(builder: (_) => const AdminManagementScreen())
         );
       }
     } else {
