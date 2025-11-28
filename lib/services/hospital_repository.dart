@@ -4,7 +4,7 @@ import 'db_service.dart';
 class HospitalRepository {
   final DbService _dbService = DbService();
 
-  // --- 1. ENFERMERA: REGISTRAR INGRESO (Sin cambios, funciona bien) ---
+  // --- 1. ENFERMERA: REGISTRAR INGRESO (Sin cambios) ---
   Future<void> registrarIngreso(Map<String, dynamic> datos) async {
     final conn = await _dbService.getConnection();
     await conn.runTx((session) async {
@@ -57,11 +57,11 @@ class HospitalRepository {
     });
   }
 
-  // --- 2. DOCTOR: BUSCAR EXPEDIENTE REAL EN BD ---
+  // --- 2. DOCTOR: BUSCAR EXPEDIENTE (VER TODO EL HISTORIAL) ---
   Future<Map<String, dynamic>?> buscarExpedienteCompleto(String curp) async {
     final conn = await _dbService.getConnection();
 
-    // A. Datos del Paciente y Episodio Actual
+    // A. Buscar Paciente y Episodio Actual (Para saber quién es)
     final resultPaciente = await conn.execute(
       Sql.named("""
         SELECT 
@@ -87,42 +87,51 @@ class HospitalRepository {
     final fechaNac = row[2] as DateTime;
     final edad = DateTime.now().year - fechaNac.year;
 
-    // B. Buscar Alergias Reales
+    // B. Alergias
     final resultAlergias = await conn.execute(
       Sql.named("SELECT agente_alergico FROM alergias WHERE id_paciente = @id"),
       parameters: {'id': idPaciente}
     );
     final alergiasList = resultAlergias.map((r) => r[0] as String).toList();
 
-    // C. HISTORIAL REAL (Lo que ya se guardó en visitas pasadas)
+    // --- C. HISTORIAL DE DIAGNÓSTICOS (SIN FILTROS) ---
+    // Trae absolutamente TODO lo que se haya guardado en la tabla diagnosticos para este paciente.
+    // Si guardaste 5 veces hoy, aquí saldrán las 5 veces.
     final resultHistorial = await conn.execute(
       Sql.named("""
         SELECT 
-          e.fecha_ingreso, 
-          COALESCE(e.diagnostico_principal, 'Sin diagnóstico') as dx,
-          STRING_AGG(m.nombre_medicamento || ' (' || m.dosis || ')', ', ') as receta_resumen
-        FROM episodios_medicos e
-        LEFT JOIN medicamentos m ON e.id_episodio = m.id_episodio
-        WHERE e.id_paciente = @id AND e.id_episodio != @actual
-        GROUP BY e.id_episodio, e.fecha_ingreso, e.diagnostico_principal
-        ORDER BY e.fecha_ingreso DESC
+           d.nombre_diagnostico,
+           d.fecha_deteccion,
+           d.estado_diagnostico
+        FROM diagnosticos d
+        JOIN episodios_medicos e ON d.id_episodio = e.id_episodio
+        WHERE e.id_paciente = @id
+        ORDER BY d.fecha_deteccion DESC, d.id_diagnostico DESC
       """),
-      parameters: {'id': idPaciente, 'actual': idEpisodioActual}
+      parameters: {'id': idPaciente} 
     );
 
-    final historialList = resultHistorial.map((r) => {
-      'fecha': r[0].toString().split(' ')[0],
-      'diagnostico': r[1],
-      'receta': r[2] ?? 'Sin medicamentos'
+    final historialList = resultHistorial.map((r) {
+      String fechaStr = '---';
+      if (r[1] != null) {
+        // Muestra Fecha y Hora para distinguir si hiciste 5 en un día
+        // Convertimos a string completo o solo fecha según prefieras. 
+        // Aquí dejo fecha simple YYYY-MM-DD, pero el orden DESC del query las acomoda bien.
+        fechaStr = r[1].toString().split(' ')[0]; 
+      }
+      return {
+        'fecha': fechaStr,
+        'diagnostico': "${r[0]} (${r[2] ?? 'Presuntivo'})", 
+        'receta': null 
+      };
     }).toList();
 
-    // D. Cargar BORRADOR del episodio actual (si el doctor ya guardó algo hoy)
-    // Diagnóstico Borrador
+    // D. Cargar Datos para el formulario (Opcional: toma el último para no empezar de cero)
+    Map<String, dynamic> dxActual = {};
     final resultDxActual = await conn.execute(
-      Sql.named("SELECT nombre_diagnostico, codigo_cie, estado_diagnostico FROM diagnosticos WHERE id_episodio = @id LIMIT 1"),
+      Sql.named("SELECT nombre_diagnostico, codigo_cie, estado_diagnostico FROM diagnosticos WHERE id_episodio = @id ORDER BY id_diagnostico DESC LIMIT 1"),
       parameters: {'id': idEpisodioActual}
     );
-    Map<String, dynamic> dxActual = {};
     if (resultDxActual.isNotEmpty) {
       dxActual = {
         'nombre': resultDxActual.first[0],
@@ -131,11 +140,12 @@ class HospitalRepository {
       };
     }
 
-    // Medicamentos Borrador
+    // Medicamentos actuales
     final resultMedsActual = await conn.execute(
       Sql.named("SELECT nombre_medicamento, dosis, frecuencia, fecha_inicio, fecha_fin FROM medicamentos WHERE id_episodio = @id"),
       parameters: {'id': idEpisodioActual}
     );
+    
     final medsActualList = resultMedsActual.map((r) {
       String duracion = '';
       if (r[4] != null && r[3] != null) {
@@ -164,52 +174,110 @@ class HospitalRepository {
         'fc': row[8], 'temp': row[9], 'spo2': row[10], 'peso': row[11], 'talla': row[12]
       },
       'alergias': alergiasList,
-      'historial': historialList, // Datos pasados
-      'dx_actual': dxActual,      // Datos presentes (si existen)
+      'historial': historialList,
+      'dx_actual': dxActual,
       'meds_actual': medsActualList
     };
   }
 
-  // --- 3. GUARDAR CONSULTA (Actualizar BD) ---
+  // --- 3. GUARDAR CONSULTA (SOLO INSERTAR - MODO LOG) ---
   Future<void> guardarConsulta({
-    required int idEpisodio,
-    required int idPaciente,
-    required String diagnostico,
-    required String cie,
-    required String estado,
-    required List<Map<String, dynamic>> medicamentos,
-  }) async {
-    final conn = await _dbService.getConnection();
-    await conn.runTx((session) async {
-      
-      // Borramos datos previos DE ESTE EPISODIO para sobrescribir con la versión nueva
-      await session.execute(Sql.named("DELETE FROM diagnosticos WHERE id_episodio = @id"), parameters: {'id': idEpisodio});
-      await session.execute(Sql.named("DELETE FROM medicamentos WHERE id_episodio = @id"), parameters: {'id': idEpisodio});
+  required int idEpisodio,
+  required int idPaciente,
+  required String diagnostico,
+  required String cie,
+  required String estado,
+  required List<Map<String, dynamic>> medicamentos,
+}) async {
+  final conn = await _dbService.getConnection();
+  await conn.runTx((session) async {
 
-      // Guardar Diagnóstico Nuevo
+    // 1️⃣ VERIFICAR SI YA EXISTE EL DIAGNÓSTICO (evitar duplicado)
+    final existente = await session.execute(
+      Sql.named("""
+        SELECT id_diagnostico 
+        FROM diagnosticos
+        WHERE id_episodio = @idEp
+        AND nombre_diagnostico = @nom
+        AND codigo_cie = @cie
+        AND estado_diagnostico = @est
+        ORDER BY fecha_deteccion DESC
+        LIMIT 1
+      """),
+      parameters: {
+        'idEp': idEpisodio,
+        'nom': diagnostico,
+        'cie': cie,
+        'est': estado,
+      },
+    );
+
+    if (existente.isEmpty) {
+      // ➕ INSERTAR SOLO SI NO EXISTE
       await session.execute(
-        Sql.named("INSERT INTO diagnosticos (id_episodio, nombre_diagnostico, codigo_cie, estado_diagnostico, fecha_deteccion) VALUES (@id, @nom, @cie, @est, @fecha)"),
-        parameters: {'id': idEpisodio, 'nom': diagnostico, 'cie': cie, 'est': estado, 'fecha': DateTime.now()}
+        Sql.named("""
+          INSERT INTO diagnosticos (id_episodio, nombre_diagnostico, codigo_cie, estado_diagnostico, fecha_deteccion)
+          VALUES (@idEp, @nom, @cie, @est, @fecha)
+        """),
+        parameters: {
+          'idEp': idEpisodio,
+          'nom': diagnostico,
+          'cie': cie,
+          'est': estado,
+          'fecha': DateTime.now(),
+        },
       );
+    }
+    // ✨ Si existe, NO insertamos nada (evita duplicado)
 
-      // Actualizar Episodio Principal
-      await session.execute(
-        Sql.named("UPDATE episodios_medicos SET diagnostico_principal = @diag, fecha_egreso = @fecha, id_medico_responsable = 1 WHERE id_episodio = @id"),
-        parameters: {'diag': diagnostico, 'fecha': DateTime.now(), 'id': idEpisodio}
-      );
 
-      // Guardar Receta Nueva
-      for (var med in medicamentos) {
-        DateTime? fechaFin;
-        if (med['duracion'] != null && med['duracion'].toString().isNotEmpty) {
-           int dias = int.tryParse(med['duracion'].toString()) ?? 0;
-           if (dias > 0) fechaFin = DateTime.now().add(Duration(days: dias));
-        }
-        await session.execute(
-          Sql.named("INSERT INTO medicamentos (id_episodio, id_paciente, nombre_medicamento, dosis, frecuencia, fecha_inicio, fecha_fin) VALUES (@idEp, @idPac, @nom, @dos, @frec, @fechaIni, @fechaFin)"),
-          parameters: {'idEp': idEpisodio, 'idPac': idPaciente, 'nom': med['nombre'], 'dos': med['dosis'], 'frec': med['frecuencia'], 'fechaIni': DateTime.now(), 'fechaFin': fechaFin}
-        );
+    // 2️⃣ ACTUALIZAR EPISODIO (título actual del dx)
+    await session.execute(
+      Sql.named("""
+        UPDATE episodios_medicos
+        SET diagnostico_principal = @nom, fecha_egreso = @fecha, id_medico_responsable = 1
+        WHERE id_episodio = @idEp
+      """),
+      parameters: {
+        'idEp': idEpisodio,
+        'nom': diagnostico,
+        'fecha': DateTime.now(),
+      },
+    );
+
+
+    // 3️⃣ REEMPLAZAR RECETA (esto no duplica)
+    await session.execute(
+      Sql.named("DELETE FROM medicamentos WHERE id_episodio = @idEp"),
+      parameters: {'idEp': idEpisodio},
+    );
+
+    for (final med in medicamentos) {
+      DateTime? fechaFin;
+
+      if (med['duracion'] != null && med['duracion'].toString().isNotEmpty) {
+        final dias = int.tryParse(med['duracion'].toString()) ?? 0;
+        if (dias > 0) fechaFin = DateTime.now().add(Duration(days: dias));
       }
-    });
-  }
+
+      await session.execute(
+        Sql.named("""
+          INSERT INTO medicamentos (
+            id_episodio, id_paciente, nombre_medicamento, dosis,
+            frecuencia, fecha_inicio, fecha_fin
+          ) VALUES (@idEp, @idPac, @nom, @dos, @freq, @ini, @fin)
+        """),
+        parameters: {
+          'idEp': idEpisodio,
+          'idPac': idPaciente,
+          'nom': med['nombre'],
+          'dos': med['dosis'],
+          'freq': med['frecuencia'],
+          'ini': DateTime.now(),
+          'fin': fechaFin,
+        },
+      );
+    }
+  });
+}
 }

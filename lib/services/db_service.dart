@@ -6,7 +6,7 @@ class DbService {
   static const int port = 5432;
   static const String databaseName = 'Expediente_Clinico_DB';
   static const String username = 'postgres'; 
-  static const String password = '1234'; // <--- ¡PON TU CONTRASEÑA!
+  static const String password = '123'; // <--- ¡PON TU CONTRASEÑA!
 
   Connection? _connection;
 
