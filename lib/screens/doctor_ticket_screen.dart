@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-import '../services/hospital_repository.dart'; 
+import 'package:inicio/services/hospital_repository.dart';
+import 'package:inicio/services/pdf_service.dart';
+
 
 class DoctorTicketScreen extends StatefulWidget {
   final Map<String, dynamic> pacienteData;
@@ -13,21 +15,15 @@ class DoctorTicketScreen extends StatefulWidget {
 class _DoctorTicketScreenState extends State<DoctorTicketScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   
-  // Claves para validar los formularios
   final _diagnosticoKey = GlobalKey<FormState>();
   final _recetaKey = GlobalKey<FormState>();
-  
-  // Instancia del repositorio para base de datos
   final _repository = HospitalRepository(); 
 
   // --- VARIABLES ---
-  
-  // Diagnóstico
   String _diagnosticoPrincipal = '';
   String _codigoCie = '';
   String _estadoDiagnostico = 'Presuntivo';
 
-  // Receta
   List<Map<String, dynamic>> _medicamentosRecetados = []; 
   String _medNombre = '';
   String _medDosis = '';
@@ -40,7 +36,6 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen> with SingleTick
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    // Intentamos cargar borrador si existe
     _cargarDatosBorrador();
   }
 
@@ -71,14 +66,12 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen> with SingleTick
     }
   }
 
-  // --- FUNCIÓN 1: GUARDAR DIAGNÓSTICO ---
   void _guardarDiagnostico() async {
     if (_diagnosticoKey.currentState!.validate()) {
       _diagnosticoKey.currentState!.save();
       setState(() => _isSaving = true);
 
       try {
-        // Guarda parcialmente
         await _repository.guardarConsulta(
           idEpisodio: widget.pacienteData['id_episodio'],
           idPaciente: widget.pacienteData['id_paciente'],
@@ -92,7 +85,7 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen> with SingleTick
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('✅ Diagnóstico guardado (Borrador)'), backgroundColor: Colors.green),
           );
-          _tabController.animateTo(2); // Mover a pestaña Receta
+          _tabController.animateTo(2); 
         }
       } catch (e) {
         if (mounted) {
@@ -104,7 +97,6 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen> with SingleTick
     }
   }
 
-  // --- FUNCIÓN 2: AGREGAR MEDICAMENTO A LA LISTA VISUAL ---
   void _agregarMedicamento() {
     if (_recetaKey.currentState!.validate()) {
       _recetaKey.currentState!.save();
@@ -120,15 +112,19 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen> with SingleTick
     }
   }
 
-  // --- FUNCIÓN 3: FINALIZAR CONSULTA (GUARDAR TODO) ---
+  // --- FUNCIÓN FINALIZAR CON PDF ---
   void _finalizarConsulta() async {
-    // Validar que haya diagnóstico
-    if (_diagnosticoPrincipal.isEmpty && !_diagnosticoKey.currentState!.validate()) {
-        _tabController.animateTo(1); 
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('⚠️ Falta el diagnóstico.')));
-        return;
+    if (_diagnosticoKey.currentState != null) {
+       if (_diagnosticoKey.currentState!.validate()) {
+         _diagnosticoKey.currentState!.save();
+       }
     }
-    _diagnosticoKey.currentState?.save();
+
+    if (_diagnosticoPrincipal.isEmpty) {
+      _tabController.animateTo(1); 
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('⚠️ Falta el diagnóstico.')));
+      return;
+    }
 
     setState(() => _isSaving = true);
 
@@ -142,18 +138,29 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen> with SingleTick
         medicamentos: _medicamentosRecetados,
       );
 
+      // LLAMADA AL SERVICIO PDF
+      if (mounted) {
+        await PdfService.imprimirReceta(
+          pacienteData: widget.pacienteData,
+          medicamentos: _medicamentosRecetados,
+          diagnostico: _diagnosticoPrincipal,
+          doctorNombre: "Dr. Usuario Actual", 
+          cedulaDoctor: "987654321",          
+        );
+      }
+
       if (mounted) {
         showDialog(
           context: context,
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
             title: const Text('✅ Consulta Finalizada'),
-            content: const Text('La información se ha registrado correctamente en la Base de Datos.'),
+            content: const Text('La receta se ha generado y los datos se guardaron correctamente.'),
             actions: [
               TextButton(
                 onPressed: () {
                   Navigator.of(ctx).pop();
-                  Navigator.of(context).pop(); // Salir
+                  Navigator.of(context).pop(); 
                 },
                 child: const Text('Aceptar'),
               )
@@ -170,7 +177,6 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen> with SingleTick
 
   @override
   Widget build(BuildContext context) {
-    // Recuperamos datos para mostrar
     final signos = widget.pacienteData['signos'];
     final historial = widget.pacienteData['historial'] as List;
     final alergias = widget.pacienteData['alergias'] as List;
@@ -196,8 +202,6 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen> with SingleTick
       body: _isSaving ? const Center(child: CircularProgressIndicator()) : TabBarView(
         controller: _tabController,
         children: [
-          
-          // --- TAB 1: INFO ACTUAL + HISTORIAL DE LA BD ---
           SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -210,33 +214,22 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen> with SingleTick
                   'Teléfono: ${widget.pacienteData['telefono']}',
                 ]),
                 const SizedBox(height: 10),
-                
                 if (alergias.isNotEmpty)
                   Container(
                     width: double.infinity, padding: const EdgeInsets.all(10), color: Colors.red.shade100,
                     child: Text('⚠️ ALERGIAS: ${alergias.join(", ")}', style: TextStyle(color: Colors.red.shade900, fontWeight: FontWeight.bold)),
                   ),
-                
                 const SizedBox(height: 10),
-                
-                // TARJETA DE TRIAGE (LO QUE PIDIÓ: INFO ENFERMERA)
                 _buildInfoCard('Signos Vitales (Triage Actual)', [
                   'Motivo Ingreso: $motivo',
                   'FC: ${signos['fc']} | Temp: ${signos['temp']}°C | SpO2: ${signos['spo2']}%',
                   'Peso: ${signos['peso']}kg | Talla: ${signos['talla']}cm',
                 ], color: Colors.orange.shade50),
-
                 const Divider(height: 30, thickness: 2),
-                
-                // HISTORIAL
-                const Text('Historial Clínico (Consultas Anteriores)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.teal)),
+                const Text('Historial Clínico', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.teal)),
                 const SizedBox(height: 10),
-                
                 if (historial.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.all(20.0),
-                    child: Text("No hay consultas anteriores registradas en la BD.", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
-                  )
+                  const Padding(padding: EdgeInsets.all(20.0), child: Text("No hay consultas anteriores.", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)))
                 else
                   ...historial.map((h) => Card(
                     margin: const EdgeInsets.only(bottom: 10),
@@ -254,16 +247,8 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen> with SingleTick
                           ),
                           const Divider(),
                           Text("Dx: ${h['diagnostico']}", style: const TextStyle(fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 5),
-                          // Mostrar receta anterior si existe
                           if (h['receta'] != null && h['receta'] != 'Sin medicamentos')
-                            Container(
-                              width: double.infinity,
-                              margin: const EdgeInsets.only(top: 5),
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(5)),
-                              child: Text("💊 ${h['receta']}", style: TextStyle(color: Colors.blue.shade900, fontSize: 13)),
-                            )
+                            Padding(padding: const EdgeInsets.only(top: 5), child: Text("💊 ${h['receta']}", style: TextStyle(color: Colors.blue.shade900, fontSize: 13)))
                         ],
                       ),
                     ),
@@ -271,15 +256,13 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen> with SingleTick
               ],
             ),
           ),
-
-          // --- TAB 2: DIAGNÓSTICO (FORMULARIO) ---
           SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Form(
               key: _diagnosticoKey,
               child: Column(
                 children: [
-                  const Text('Evaluación Clínica (Nuevo)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Text('Evaluación Clínica', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 15),
                   TextFormField(
                     initialValue: _diagnosticoPrincipal,
@@ -303,17 +286,15 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen> with SingleTick
                   ),
                   const SizedBox(height: 20),
                   ElevatedButton.icon(
-                    onPressed: _guardarDiagnostico, // AQUI SE LLAMA LA FUNCIÓN
+                    onPressed: _guardarDiagnostico,
                     icon: const Icon(Icons.save),
-                    label: const Text('GUARDAR DIAGNÓSTICO'),
+                    label: const Text('GUARDAR BORRADOR'),
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white, padding: const EdgeInsets.all(15)),
                   )
                 ],
               ),
             ),
           ),
-
-          // --- TAB 3: RECETA (CON DURACIÓN) ---
           SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -390,15 +371,6 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen> with SingleTick
           ],
         ),
       ),
-    );
-  }
-
-  Widget _signoItem(String label, String value) {
-    return Column(
-      children: [
-        Text(label, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey, fontSize: 12)),
-        Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-      ],
     );
   }
 }

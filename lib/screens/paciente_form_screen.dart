@@ -159,7 +159,7 @@ class _PacienteFormScreenState extends State<PacienteFormScreen> {
               const SizedBox(height: 10),
               DropdownButtonFormField<String>(
                 decoration: const InputDecoration(labelText: 'Género', border: OutlineInputBorder()),
-                value: _generoSeleccionado,
+                initialValue: _generoSeleccionado,
                 items: _generos.map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
                 onChanged: (v) => setState(() => _generoSeleccionado = v),
                 validator: (v) => v == null ? 'Requerido' : null,
