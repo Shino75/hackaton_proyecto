@@ -19,18 +19,29 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen>
 
   final _diagnosticoKey = GlobalKey<FormState>();
   final _recetaKey = GlobalKey<FormState>();
+  // 🟢 Nueva clave para el formulario de procedimientos
+  final _procedimientoKey = GlobalKey<FormState>(); 
   final _repository = HospitalRepository();
 
-  // --- VARIABLES ---
+  // --- VARIABLES DIAGNÓSTICO ---
   String _diagnosticoPrincipal = '';
   String _codigoCie = '';
   String _estadoDiagnostico = 'Presuntivo';
 
+  // --- VARIABLES MEDICAMENTOS ---
   List<Map<String, dynamic>> _medicamentosRecetados = [];
   String _medNombre = '';
   String _medDosis = '';
   String _medFrecuencia = '';
   String _medDuracion = '';
+
+  // 🟢 --- VARIABLES PROCEDIMIENTOS ---
+  List<Map<String, dynamic>> _procedimientos = [];
+  String _nombreProcedimiento = '';
+  String _codigoCups = '';
+  String _descripcionDetallada = '';
+  String _tipoProcedimiento = 'Diagnóstico';
+  DateTime _fechaProcedimiento = DateTime.now();
 
   bool _isSaving = false;
 
@@ -48,6 +59,7 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen>
   }
 
   void _cargarDatosBorrador() {
+    // Diagnóstico
     final dx = widget.pacienteData['dx_actual'];
     if (dx != null && dx is Map && dx.isNotEmpty) {
       _diagnosticoPrincipal = dx['nombre'] ?? '';
@@ -55,6 +67,7 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen>
       _estadoDiagnostico = dx['estado'] ?? 'Presuntivo';
     }
 
+    // Medicamentos
     final meds = widget.pacienteData['meds_actual'];
     if (meds != null && meds is List && meds.isNotEmpty) {
       for (var m in meds) {
@@ -66,6 +79,81 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen>
         });
       }
     }
+
+    // 🟢 Cargar Procedimientos
+    final procs = widget.pacienteData['procs_actual'];
+    if (procs != null && procs is List && procs.isNotEmpty) {
+      for (var p in procs) {
+        _procedimientos.add({
+          'nombre_procedimiento': p['nombre_procedimiento'],
+          'codigo_cups': p['codigo_cups'],
+          'fecha_procedimiento': _parseFecha(p['fecha_procedimiento']),
+          'descripcion_detallada': p['descripcion_detallada'],
+          'tipo_procedimiento': p['tipo_procedimiento']
+        });
+      }
+    }
+  }
+
+  DateTime _parseFecha(dynamic fecha) {
+    if (fecha is DateTime) return fecha;
+    if (fecha is String) {
+      try {
+        return DateTime.parse(fecha);
+      } catch (e) {
+        return DateTime.now();
+      }
+    }
+    return DateTime.now();
+  }
+
+  // 🟢 Función para seleccionar fecha
+  Future<void> _seleccionarFecha() async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _fechaProcedimiento,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2101),
+    );
+    if (picked != null && picked != _fechaProcedimiento) {
+      setState(() {
+        _fechaProcedimiento = picked;
+      });
+    }
+  }
+
+  // 🟢 Función para agregar procedimiento a la lista local
+  void _agregarProcedimiento() {
+    if (_procedimientoKey.currentState!.validate()) {
+      _procedimientoKey.currentState!.save();
+      setState(() {
+        _procedimientos.add({
+          'nombre_procedimiento': _nombreProcedimiento,
+          'codigo_cups': _codigoCups,
+          'fecha_procedimiento': _fechaProcedimiento, 
+          'descripcion_detallada': _descripcionDetallada,
+          'tipo_procedimiento': _tipoProcedimiento,
+        });
+        
+        // Limpiar campos
+        _nombreProcedimiento = '';
+        _codigoCups = '';
+        _descripcionDetallada = '';
+        _fechaProcedimiento = DateTime.now();
+      });
+      _procedimientoKey.currentState!.reset();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Procedimiento agregado a la lista'), duration: Duration(seconds: 1)),
+      );
+    }
+  }
+
+  // 🟢 Función para eliminar procedimiento
+  void _eliminarProcedimiento(int index) {
+    setState(() {
+      _procedimientos.removeAt(index);
+    });
   }
 
   void _guardarDiagnostico() async {
@@ -81,16 +169,17 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen>
           cie: _codigoCie,
           estado: _estadoDiagnostico,
           medicamentos: _medicamentosRecetados,
+          procedimientos: _procedimientos, // 🟢 Enviamos procedimientos
         );
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('✅ Diagnóstico guardado (Borrador)'),
+              content: Text('✅ Datos guardados correctamente (Borrador)'),
               backgroundColor: Colors.green,
             ),
           );
-          _tabController.animateTo(2);
+          // Opcional: _tabController.animateTo(2);
         }
       } catch (e) {
         if (mounted) {
@@ -148,6 +237,7 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen>
         cie: _codigoCie,
         estado: _estadoDiagnostico,
         medicamentos: _medicamentosRecetados,
+        procedimientos: _procedimientos, // 🟢 Enviamos procedimientos
       );
 
       // LLAMADA AL SERVICIO PDF
@@ -157,7 +247,7 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen>
           medicamentos: _medicamentosRecetados,
           diagnostico: _diagnosticoPrincipal,
           doctorNombre: "Dr. Usuario Actual",
-          cedulaDoctor: "987654321",
+          cedulaDoctor: "987654321", // 🟢 Pasamos procedimientos al PDF
         );
       }
 
@@ -202,14 +292,13 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen>
     final historial = widget.pacienteData['historial'] as List;
     final motivo = widget.pacienteData['motivo'];
 
-    // 🟢 OBTENEMOS LA LISTA DE LABORATORIOS (Puede venir nula o vacía)
+    // OBTENEMOS LA LISTA DE LABORATORIOS (Puede venir nula o vacía)
     final laboratoriosRaw = widget.pacienteData['laboratorios'];
     List<String> laboratorios = [];
     if (laboratoriosRaw != null && laboratoriosRaw is List) {
       laboratorios = laboratoriosRaw.map((e) => e.toString()).toList();
     }
 
-    // ID del paciente para el módulo de alergias
     final int idPaciente = widget.pacienteData['id_paciente'] as int;
 
     return Scaffold(
@@ -263,13 +352,13 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen>
                         color: Colors.orange.shade50,
                       ),
 
-                      // 🟢 AQUÍ MOSTRAMOS LOS RESULTADOS DE LABORATORIO (SI EXISTEN)
+                      // AQUÍ MOSTRAMOS LOS RESULTADOS DE LABORATORIO (SI EXISTEN)
                       if (laboratorios.isNotEmpty) ...[
                         const SizedBox(height: 10),
                         _buildInfoCard(
                           '🧪 Resultados de Laboratorio',
                           laboratorios, 
-                          color: Colors.blue.shade50, // Fondo azulito para distinguir
+                          color: Colors.blue.shade50,
                         ),
                       ],
 
@@ -305,8 +394,7 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen>
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                       children: [
                                         Text(
                                           h['fecha'],
@@ -315,11 +403,7 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen>
                                             color: Colors.teal,
                                           ),
                                         ),
-                                        const Icon(
-                                          Icons.history,
-                                          size: 18,
-                                          color: Colors.grey,
-                                        ),
+                                        const Icon(Icons.history, size: 18, color: Colors.grey),
                                       ],
                                     ),
                                     const Divider(),
@@ -349,77 +433,240 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen>
                   ),
                 ),
 
-                // --- TAB 2: DIAGNÓSTICO ---
+                // --- TAB 2: DIAGNÓSTICO Y PROCEDIMIENTOS ---
                 SingleChildScrollView(
                   padding: const EdgeInsets.all(16),
-                  child: Form(
-                    key: _diagnosticoKey,
-                    child: Column(
-                      children: [
-                        const Text(
-                          'Evaluación Clínica',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 15),
-                        TextFormField(
-                          initialValue: _diagnosticoPrincipal,
-                          decoration: const InputDecoration(
-                            labelText: 'Diagnóstico Principal',
-                            border: OutlineInputBorder(),
-                          ),
-                          maxLines: 3,
-                          validator: (v) => v!.isEmpty ? 'Requerido' : null,
-                          onSaved: (v) => _diagnosticoPrincipal = v!,
-                        ),
-                        const SizedBox(height: 20),
-                        Row(
+                  child: Column(
+                    children: [
+                      // FORMULARIO DIAGNÓSTICO
+                      Form(
+                        key: _diagnosticoKey,
+                        child: Column(
                           children: [
-                            Expanded(
-                              child: TextFormField(
-                                initialValue: _codigoCie,
-                                decoration: const InputDecoration(
-                                  labelText: 'CIE-10',
-                                  border: OutlineInputBorder(),
-                                ),
-                                onSaved: (v) => _codigoCie = v!,
+                            const Text(
+                              'Evaluación Clínica',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: DropdownButtonFormField<String>(
-                                decoration: const InputDecoration(
-                                  labelText: 'Estado',
-                                  border: OutlineInputBorder(),
-                                ),
-                                value: _estadoDiagnostico,
-                                items: ['Presuntivo', 'Confirmado']
-                                    .map((e) => DropdownMenuItem(
-                                          value: e,
-                                          child: Text(e),
-                                        ))
-                                    .toList(),
-                                onChanged: (v) =>
-                                    setState(() => _estadoDiagnostico = v!),
+                            const SizedBox(height: 15),
+                            TextFormField(
+                              initialValue: _diagnosticoPrincipal,
+                              decoration: const InputDecoration(
+                                labelText: 'Diagnóstico Principal',
+                                border: OutlineInputBorder(),
                               ),
+                              maxLines: 3,
+                              validator: (v) => v!.isEmpty ? 'Requerido' : null,
+                              onSaved: (v) => _diagnosticoPrincipal = v!,
+                            ),
+                            const SizedBox(height: 20),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextFormField(
+                                    initialValue: _codigoCie,
+                                    decoration: const InputDecoration(
+                                      labelText: 'CIE-10',
+                                      border: OutlineInputBorder(),
+                                    ),
+                                    onSaved: (v) => _codigoCie = v!,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: DropdownButtonFormField<String>(
+                                    decoration: const InputDecoration(
+                                      labelText: 'Estado',
+                                      border: OutlineInputBorder(),
+                                    ),
+                                    value: _estadoDiagnostico,
+                                    items: ['Presuntivo', 'Confirmado']
+                                        .map((e) => DropdownMenuItem(
+                                              value: e,
+                                              child: Text(e),
+                                            ))
+                                        .toList(),
+                                    onChanged: (v) =>
+                                        setState(() => _estadoDiagnostico = v!),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
+                      ),
+                      
+                      const SizedBox(height: 30),
+                      const Divider(),
+
+                      // 🟢 FORMULARIO DE PROCEDIMIENTOS
+                      Form(
+                        key: _procedimientoKey,
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade50,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.blue.shade200),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                '📋 Procedimientos Médicos',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.blue,
+                                ),
+                              ),
+                              const SizedBox(height: 15),
+                              TextFormField(
+                                decoration: const InputDecoration(
+                                  labelText: 'Nombre del Procedimiento *',
+                                  border: OutlineInputBorder(),
+                                ),
+                                validator: (v) => v!.isEmpty ? 'Requerido' : null,
+                                onSaved: (v) => _nombreProcedimiento = v!,
+                              ),
+                              const SizedBox(height: 10),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: TextFormField(
+                                      decoration: const InputDecoration(
+                                        labelText: 'Código CUPS',
+                                        border: OutlineInputBorder(),
+                                        hintText: 'Opcional',
+                                      ),
+                                      onSaved: (v) => _codigoCups = v ?? '',
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: DropdownButtonFormField<String>(
+                                      decoration: const InputDecoration(
+                                        labelText: 'Tipo',
+                                        border: OutlineInputBorder(),
+                                      ),
+                                      value: _tipoProcedimiento,
+                                      items: [
+                                        'Diagnóstico',
+                                        'Terapéutico',
+                                        'Quirúrgico',
+                                        'Preventivo',
+                                        'Rehabilitación',
+                                        'Otro'
+                                      ].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                                      onChanged: (v) => setState(() => _tipoProcedimiento = v!),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              // Selector de fecha
+                              InkWell(
+                                onTap: _seleccionarFecha,
+                                child: InputDecorator(
+                                  decoration: const InputDecoration(
+                                    labelText: 'Fecha del Procedimiento',
+                                    border: OutlineInputBorder(),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        '${_fechaProcedimiento.day}/${_fechaProcedimiento.month}/${_fechaProcedimiento.year}',
+                                      ),
+                                      const Icon(Icons.calendar_today),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              TextFormField(
+                                decoration: const InputDecoration(
+                                  labelText: 'Descripción Detallada',
+                                  border: OutlineInputBorder(),
+                                  hintText: 'Descripción opcional...',
+                                ),
+                                maxLines: 3,
+                                onSaved: (v) => _descripcionDetallada = v ?? '',
+                              ),
+                              const SizedBox(height: 15),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: _agregarProcedimiento,
+                                  icon: const Icon(Icons.add),
+                                  label: const Text('AGREGAR PROCEDIMIENTO'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.blue,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.all(15),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      // 🟢 LISTA DE PROCEDIMIENTOS AGREGADOS
+                      if (_procedimientos.isNotEmpty) ...[
                         const SizedBox(height: 20),
-                        ElevatedButton.icon(
+                        const Text(
+                          'Procedimientos Agregados:',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: Colors.blue,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        ..._procedimientos.asMap().entries.map((entry) => Card(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          color: Colors.blue.shade50,
+                          child: ListTile(
+                            leading: const Icon(Icons.medical_services, color: Colors.blue),
+                            title: Text(
+                              entry.value['nombre_procedimiento'],
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (entry.value['codigo_cups'] != null && entry.value['codigo_cups'].isNotEmpty)
+                                  Text('CUPS: ${entry.value['codigo_cups']}'),
+                                Text('Tipo: ${entry.value['tipo_procedimiento']}'),
+                                Text('Fecha: ${_formatearFecha(entry.value['fecha_procedimiento'])}'),
+                              ],
+                            ),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                              onPressed: () => _eliminarProcedimiento(entry.key),
+                            ),
+                          ),
+                        )),
+                      ],
+
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
                           onPressed: _guardarDiagnostico,
                           icon: const Icon(Icons.save),
-                          label: const Text('GUARDAR BORRADOR'),
+                          label: const Text('GUARDAR BORRADOR COMPLETO'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.teal,
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.all(15),
                           ),
-                        )
-                      ],
-                    ),
+                        ),
+                      )
+                    ],
                   ),
                 ),
 
@@ -544,6 +791,21 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen>
     );
   }
 
+  String _formatearFecha(dynamic fecha) {
+    if (fecha is DateTime) {
+      return '${fecha.day}/${fecha.month}/${fecha.year}';
+    }
+    if (fecha is String) {
+      try {
+        DateTime dt = DateTime.parse(fecha);
+         return '${dt.day}/${dt.month}/${dt.year}';
+      } catch(e) {
+        return fecha;
+      }
+    }
+    return 'Fecha no disponible';
+  }
+
   Widget _buildInfoCard(String title, List<String> lines, {Color color = Colors.white}) {
     return Card(
       color: color,
@@ -565,7 +827,7 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen>
             ...lines.map((line) => Padding(
                   padding: const EdgeInsets.symmetric(vertical: 2),
                   child: Text(line),
-                )).toList(),
+                )),
           ],
         ),
       ),

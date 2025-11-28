@@ -5,13 +5,12 @@ class HospitalRepository {
   final DbService _dbService = DbService();
 
   // --- 1. ENFERMERA: REGISTRAR INGRESO (CON SOPORTE PARA LABORATORIO) ---
+  // (Este método se queda exactamente igual a como lo tenías)
   Future<void> registrarIngreso(Map<String, dynamic> datos) async {
     final conn = await _dbService.getConnection();
     
     await conn.runTx((session) async {
-      // ---------------------------------------------------
       // PASO A: Insertar o reutilizar Paciente
-      // ---------------------------------------------------
       final resultBusqueda = await session.execute(
         Sql.named("SELECT id_paciente FROM pacientes WHERE curp = @curp"),
         parameters: {'curp': datos['curp']},
@@ -20,10 +19,8 @@ class HospitalRepository {
       int idPaciente;
 
       if (resultBusqueda.isNotEmpty) {
-        // Si ya existe, usamos su ID
         idPaciente = resultBusqueda.first[0] as int;
       } else {
-        // Si no existe, lo insertamos
         final resultInsertPaciente = await session.execute(
           Sql.named("""
             INSERT INTO pacientes (nombre, apellido_paterno, fecha_nacimiento, genero, curp, contacto_telefono, direccion_completa)
@@ -43,9 +40,7 @@ class HospitalRepository {
         idPaciente = resultInsertPaciente[0][0] as int;
       }
 
-      // ---------------------------------------------------
       // PASO B: Insertar Episodio Médico
-      // ---------------------------------------------------
       final tipoEpisodio = (datos['tipo_servicio'] == 'Estudio') ? 'Laboratorio' : 'Urgencia';
 
       final resultEpisodio = await session.execute(
@@ -63,13 +58,9 @@ class HospitalRepository {
       );
       final idEpisodio = resultEpisodio[0][0] as int;
 
-      // ---------------------------------------------------
       // PASO C: Insertar Datos Específicos (SWITCH)
-      // ---------------------------------------------------
-      
       if (datos['tipo_servicio'] == 'Estudio') {
-        // >>> CASO 1: LABORATORIO (Insertar múltiples filas) <<<
-        
+        // CASO 1: LABORATORIO
         final estudiosPosibles = {
           'glucosa': 'Glucosa (mg/dL)',
           'urea': 'Urea (mg/dL)',
@@ -79,30 +70,17 @@ class HospitalRepository {
           'trigliceridos': 'Triglicéridos (mg/dL)',
         };
 
-        // Recorremos cada campo. Si tiene valor, insertamos una fila.
         for (var entry in estudiosPosibles.entries) {
           String keyFormulario = entry.key;
           String nombreEstudioDb = entry.value;
-          
           var valor = datos[keyFormulario];
 
-          // Solo insertamos si el valor no está vacío ni nulo
           if (valor != null && valor.toString().trim().isNotEmpty) {
              await session.execute(
               Sql.named("""
                 INSERT INTO resultados_lab (
-                  id_episodio, 
-                  nombre_estudio,    -- Nombre del estudio (ej. Glucosa)
-                  valor_resultado,   -- Valor capturado (ej. 95)
-                  fecha_toma,
-                  documento_enlace   -- Usamos esto para observaciones
-                ) VALUES (
-                  @idEp, 
-                  @nombre, 
-                  @valor, 
-                  CURRENT_DATE,
-                  @obs
-                )
+                  id_episodio, nombre_estudio, valor_resultado, fecha_toma, documento_enlace
+                ) VALUES (@idEp, @nombre, @valor, CURRENT_DATE, @obs)
               """),
               parameters: {
                 'idEp': idEpisodio,
@@ -113,9 +91,8 @@ class HospitalRepository {
             );
           }
         }
-
       } else {
-        // >>> CASO 2: CONSULTA NORMAL (Signos Vitales) <<<
+        // CASO 2: CONSULTA NORMAL (Signos Vitales)
         await session.execute(
           Sql.named("""
             INSERT INTO evaluacion_enfermeria (
@@ -137,7 +114,7 @@ class HospitalRepository {
     });
   }
 
-  // --- 2. DOCTOR: BUSCAR EXPEDIENTE (Actualizado con Labs) ---
+  // --- 2. DOCTOR: BUSCAR EXPEDIENTE (Actualizado con Labs y Procedimientos) ---
   Future<Map<String, dynamic>?> buscarExpedienteCompleto(String curp) async {
     final conn = await _dbService.getConnection();
 
@@ -174,21 +151,17 @@ class HospitalRepository {
     );
     final alergiasList = resultAlergias.map((r) => r[0] as String).toList();
 
-    // --- C. NUEVO: Resultados de Laboratorio del Episodio Actual ---
+    // C. Resultados de Laboratorio
     final resultLabs = await conn.execute(
       Sql.named("SELECT nombre_estudio, valor_resultado FROM resultados_lab WHERE id_episodio = @id"),
       parameters: {'id': idEpisodioActual}
     );
-    // Convertimos a una lista de Strings para facilitar la visualización (Ej: "Glucosa: 100")
     final laboratoriosList = resultLabs.map((r) => "${r[0]}: ${r[1]}").toList();
 
     // D. Historial
     final resultHistorial = await conn.execute(
       Sql.named("""
-        SELECT 
-           d.nombre_diagnostico,
-           d.fecha_deteccion,
-           d.estado_diagnostico
+        SELECT d.nombre_diagnostico, d.fecha_deteccion, d.estado_diagnostico
         FROM diagnosticos d
         JOIN episodios_medicos e ON d.id_episodio = e.id_episodio
         WHERE e.id_paciente = @id
@@ -207,7 +180,7 @@ class HospitalRepository {
       };
     }).toList();
 
-    // E. Datos actuales (Diagnóstico y Meds)
+    // E. Datos actuales (Diagnóstico, Meds y Procedimientos)
     Map<String, dynamic> dxActual = {};
     final resultDxActual = await conn.execute(
       Sql.named("SELECT nombre_diagnostico, codigo_cie, estado_diagnostico FROM diagnosticos WHERE id_episodio = @id ORDER BY id_diagnostico DESC LIMIT 1"),
@@ -241,6 +214,26 @@ class HospitalRepository {
       };
     }).toList();
 
+    // 🟢 F. Recuperar Procedimientos Actuales
+    final resultProcsActual = await conn.execute(
+      Sql.named("""
+        SELECT nombre_procedimiento, codigo_cups, fecha_procedimiento, descripcion_detallada, tipo_procedimiento
+        FROM procedimientos
+        WHERE id_episodio = @id
+      """),
+      parameters: {'id': idEpisodioActual}
+    );
+
+    final procsActualList = resultProcsActual.map((r) {
+      return {
+        'nombre_procedimiento': r[0],
+        'codigo_cups': r[1],
+        'fecha_procedimiento': r[2], // DateTime o String
+        'descripcion_detallada': r[3],
+        'tipo_procedimiento': r[4],
+      };
+    }).toList();
+
     return {
       'id_episodio': idEpisodioActual,
       'id_paciente': idPaciente,
@@ -257,15 +250,16 @@ class HospitalRepository {
         'peso': row[12] ?? 0.0, 
         'talla': row[13] ?? 0.0
       },
-      'laboratorios': laboratoriosList, // <--- LISTA AGREGADA
+      'laboratorios': laboratoriosList, 
       'alergias': alergiasList,
       'historial': historialList,
       'dx_actual': dxActual,
-      'meds_actual': medsActualList
+      'meds_actual': medsActualList,
+      'procs_actual': procsActualList // 🟢 Agregado
     };
   }
 
-  // --- 3. GUARDAR CONSULTA ---
+  // --- 3. GUARDAR CONSULTA (CON PROCEDIMIENTOS) ---
   Future<void> guardarConsulta({
     required int idEpisodio,
     required int idPaciente,
@@ -273,6 +267,8 @@ class HospitalRepository {
     required String cie,
     required String estado,
     required List<Map<String, dynamic>> medicamentos,
+    // 🟢 Nuevo parámetro
+    required List<Map<String, dynamic>> procedimientos, 
   }) async {
     final conn = await _dbService.getConnection();
     await conn.runTx((session) async {
@@ -339,6 +335,31 @@ class HospitalRepository {
             'freq': med['frecuencia'],
             'ini': DateTime.now(),
             'fin': fechaFin,
+          },
+        );
+      }
+
+      // 🟢 4. Reemplazar Procedimientos
+      await session.execute(
+        Sql.named("DELETE FROM procedimientos WHERE id_episodio = @idEp"),
+        parameters: {'idEp': idEpisodio},
+      );
+
+      for (final proc in procedimientos) {
+        await session.execute(
+          Sql.named("""
+            INSERT INTO procedimientos (
+              id_episodio, nombre_procedimiento, codigo_cups, 
+              fecha_procedimiento, descripcion_detallada, tipo_procedimiento
+            ) VALUES (@idEp, @nombre, @cups, @fecha, @desc, @tipo)
+          """),
+          parameters: {
+            'idEp': idEpisodio,
+            'nombre': proc['nombre_procedimiento'],
+            'cups': proc['codigo_cups'] ?? '',
+            'fecha': proc['fecha_procedimiento'],
+            'desc': proc['descripcion_detallada'] ?? '',
+            'tipo': proc['tipo_procedimiento'] ?? 'Diagnóstico',
           },
         );
       }
