@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:inicio/services/hospital_repository.dart';
 import 'package:inicio/services/pdf_service.dart';
-// 🟢 IMPORTAR EL WIDGET DE ALERGIAS (Ajusta la ruta si es necesario)
+// Asegúrate de que esta ruta sea correcta según tu proyecto
 import '../widgets/modulo_alergias.dart';
 
 class DoctorTicketScreen extends StatefulWidget {
@@ -202,7 +202,14 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen>
     final historial = widget.pacienteData['historial'] as List;
     final motivo = widget.pacienteData['motivo'];
 
-    // 🟢 Obtener el ID del paciente, clave para el módulo de Alergias
+    // 🟢 OBTENEMOS LA LISTA DE LABORATORIOS (Puede venir nula o vacía)
+    final laboratoriosRaw = widget.pacienteData['laboratorios'];
+    List<String> laboratorios = [];
+    if (laboratoriosRaw != null && laboratoriosRaw is List) {
+      laboratorios = laboratoriosRaw.map((e) => e.toString()).toList();
+    }
+
+    // ID del paciente para el módulo de alergias
     final int idPaciente = widget.pacienteData['id_paciente'] as int;
 
     return Scaffold(
@@ -241,8 +248,7 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen>
                       ]),
                       const SizedBox(height: 10),
 
-                      // 🟢 INSERCIÓN DEL MÓDULO ALERGIAS
-                      // El widget ModuloAlergias ahora se encarga de cargar y mostrar las alergias usando su propio repositorio
+                      // Módulo Alergias
                       ModuloAlergias(idPaciente: idPaciente),
 
                       const SizedBox(height: 10),
@@ -256,6 +262,16 @@ class _DoctorTicketScreenState extends State<DoctorTicketScreen>
                         ],
                         color: Colors.orange.shade50,
                       ),
+
+                      // 🟢 AQUÍ MOSTRAMOS LOS RESULTADOS DE LABORATORIO (SI EXISTEN)
+                      if (laboratorios.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _buildInfoCard(
+                          '🧪 Resultados de Laboratorio',
+                          laboratorios, 
+                          color: Colors.blue.shade50, // Fondo azulito para distinguir
+                        ),
+                      ],
 
                       const Divider(height: 30, thickness: 2),
 
