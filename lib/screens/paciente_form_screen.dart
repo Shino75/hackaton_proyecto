@@ -1,7 +1,8 @@
 // lib/screens/paciente_form_screen.dart
 
 import 'package:flutter/material.dart';
-import '../services/mock_database.dart'; // Importamos la DB
+import '../services/hospital_repository.dart'; 
+import 'login_screen.dart'; 
 
 class PacienteFormScreen extends StatefulWidget {
   const PacienteFormScreen({super.key});
@@ -12,8 +13,9 @@ class PacienteFormScreen extends StatefulWidget {
 
 class _PacienteFormScreenState extends State<PacienteFormScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _repository = HospitalRepository(); 
 
-  // --- VARIABLES DE DATOS ---
+  // Variables del formulario
   String _nombre = '';
   String _apellidoPaterno = '';
   DateTime? _fechaNacimiento;
@@ -22,7 +24,8 @@ class _PacienteFormScreenState extends State<PacienteFormScreen> {
   String _curp = '';
   String _telefono = '';
   String _direccion = '';
-
+  
+  // Variables Signos
   String _motivoConsulta = '';
   String _frecuenciaCardiaca = ''; 
   String _frecuenciaRespiratoria = ''; 
@@ -32,6 +35,7 @@ class _PacienteFormScreenState extends State<PacienteFormScreen> {
   String _talla = '';
 
   final TextEditingController _fechaController = TextEditingController();
+  bool _isLoading = false; 
 
   Future<void> _selectDate(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
@@ -41,7 +45,7 @@ class _PacienteFormScreenState extends State<PacienteFormScreen> {
       lastDate: DateTime.now(),
       locale: const Locale('es', 'ES'),
     );
-    if (picked != null && picked != _fechaNacimiento) {
+    if (picked != null) {
       setState(() {
         _fechaNacimiento = picked;
         _fechaController.text = "${picked.toLocal()}".split(' ')[0];
@@ -49,215 +53,176 @@ class _PacienteFormScreenState extends State<PacienteFormScreen> {
     }
   }
 
-  void _submitForm() {
+  void _submitForm() async {
     if (_formKey.currentState!.validate()) {
       _formKey.currentState!.save();
-      
-      // 1. Crear el objeto de datos
-      Map<String, dynamic> nuevoRegistro = {
-        'curp': _curp, // CLAVE PRINCIPAL
-        'nombre': '$_nombre $_apellidoPaterno',
-        'edad': (DateTime.now().year - _fechaNacimiento!.year).toString(),
-        'genero': _generoSeleccionado,
-        'fecha_nacimiento': _fechaController.text,
-        'telefono': _telefono,
-        'direccion': _direccion,
-        'motivo': _motivoConsulta,
-        'signos': 'FC: $_frecuenciaCardiaca | FR: $_frecuenciaRespiratoria | T: $_temperatura | SpO2: $_saturacionOxigeno | Peso: $_peso | Talla: $_talla'
-      };
+      setState(() => _isLoading = true); 
 
-      // 2. Guardar en Base de Datos Simulada
-      MockDatabase.guardarPaciente(nuevoRegistro);
-      
-      // 3. Mostrar confirmación
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Paciente $_nombre registrado. Datos guardados.'),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 3),
-        ),
-      );
-      
-      // 4. Limpiar Formulario
-      _formKey.currentState?.reset();
-      _fechaController.clear();
-      setState(() {
-        _fechaNacimiento = null;
-        _generoSeleccionado = null;
-      });
-      
-      // Subir scroll al inicio
-      Scrollable.ensureVisible(_formKey.currentContext!);
+      try {
+        await _repository.registrarIngreso({
+          'nombre': _nombre,
+          'apellido': _apellidoPaterno,
+          'fecha_nacimiento': _fechaController.text, 
+          'genero': _generoSeleccionado,
+          'curp': _curp,
+          'telefono': _telefono,
+          'direccion': _direccion,
+          'motivo': _motivoConsulta,
+          'fc': _frecuenciaCardiaca,
+          'temp': _temperatura,
+          'spo2': _saturacionOxigeno,
+          'peso': _peso,
+          'talla': _talla,
+        });
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('✅ Paciente $_nombre guardado en Base de Datos'), backgroundColor: Colors.green),
+          );
+          _formKey.currentState?.reset();
+          _fechaController.clear();
+          setState(() {
+            _fechaNacimiento = null;
+            _generoSeleccionado = null;
+          });
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('❌ Error al guardar: $e'), backgroundColor: Colors.red),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _isLoading = false);
+      }
     }
+  }
+
+  void _cerrarSesion() {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (context) => const LoginScreen()),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('🏥 Triage Enfermería'),
-        backgroundColor: Colors.indigo,
+        title: const Text('Enfermería - Registro'), 
+        backgroundColor: Colors.indigo, 
         foregroundColor: Colors.white,
+        automaticallyImplyLeading: false, // Oculta la flecha de atrás automática
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20.0),
         child: Form(
           key: _formKey,
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              const Text(
-                'Datos del Paciente',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo),
-              ),
-              const SizedBox(height: 10),
-              
-              // NOMBRE Y APELLIDO
-              Row(
-                children: [
-                  Expanded(child: TextFormField(
-                    decoration: const InputDecoration(labelText: 'Nombre', border: OutlineInputBorder()),
-                    onSaved: (v) => _nombre = v!,
-                    validator: (v) => v!.isEmpty ? 'Requerido' : null,
-                  )),
-                  const SizedBox(width: 10),
-                  Expanded(child: TextFormField(
-                    decoration: const InputDecoration(labelText: 'Apellidos', border: OutlineInputBorder()),
-                    onSaved: (v) => _apellidoPaterno = v!,
-                    validator: (v) => v!.isEmpty ? 'Requerido' : null,
-                  )),
-                ],
-              ),
-              const SizedBox(height: 10),
-              
-              // FECHA Y GENERO
-              Row(
-                children: [
-                   Expanded(
-                    child: TextFormField(
-                      controller: _fechaController,
-                      readOnly: true,
-                      decoration: const InputDecoration(labelText: 'Fecha Nac.', border: OutlineInputBorder(), suffixIcon: Icon(Icons.calendar_today)),
-                      onTap: () => _selectDate(context),
-                      validator: (v) => _fechaNacimiento == null ? 'Requerido' : null,
-                    ),
+              // --- BOTÓN DE SALIR (MUY VISIBLE) ---
+              Container(
+                margin: const EdgeInsets.only(bottom: 20),
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _cerrarSesion,
+                  icon: const Icon(Icons.logout),
+                  label: const Text('CERRAR SESIÓN Y SALIR'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red.shade100, // Fondo rojo claro
+                    foregroundColor: Colors.red.shade900, // Texto rojo oscuro
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    elevation: 0,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      decoration: const InputDecoration(labelText: 'Género', border: OutlineInputBorder()),
-                      value: _generoSeleccionado,
-                      items: _generos.map((g) => DropdownMenuItem(value: g, child: Text(g == 'M' ? 'Masculino' : 'Femenino'))).toList(),
-                      onChanged: (v) => setState(() => _generoSeleccionado = v),
-                      validator: (v) => v == null ? 'Requerido' : null,
-                    ),
-                  ),
-                ],
+                ),
               ),
-              const SizedBox(height: 10),
 
-              // CURP
+              // Campos Datos Personales
               TextFormField(
-                decoration: const InputDecoration(labelText: 'CURP', border: OutlineInputBorder(), prefixIcon: Icon(Icons.badge)),
-                textCapitalization: TextCapitalization.characters,
-                maxLength: 18,
+                decoration: const InputDecoration(labelText: 'Nombre', border: OutlineInputBorder()),
+                onSaved: (v) => _nombre = v!,
+                validator: (v) => v!.isEmpty ? 'Requerido' : null,
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                decoration: const InputDecoration(labelText: 'Apellidos', border: OutlineInputBorder()),
+                onSaved: (v) => _apellidoPaterno = v!,
+                validator: (v) => v!.isEmpty ? 'Requerido' : null,
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _fechaController,
+                decoration: const InputDecoration(labelText: 'Fecha Nacimiento', border: OutlineInputBorder(), suffixIcon: Icon(Icons.calendar_today)),
+                readOnly: true,
+                onTap: () => _selectDate(context),
+                validator: (v) => v!.isEmpty ? 'Requerido' : null,
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(
+                decoration: const InputDecoration(labelText: 'Género', border: OutlineInputBorder()),
+                value: _generoSeleccionado,
+                items: _generos.map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
+                onChanged: (v) => setState(() => _generoSeleccionado = v),
+                validator: (v) => v == null ? 'Requerido' : null,
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                decoration: const InputDecoration(labelText: 'CURP', border: OutlineInputBorder()),
                 onSaved: (v) => _curp = v!,
                 validator: (v) => v!.isEmpty ? 'Requerido' : null,
               ),
-
-              // CONTACTO
+              const SizedBox(height: 10),
               TextFormField(
-                decoration: const InputDecoration(labelText: 'Teléfono', border: OutlineInputBorder(), prefixIcon: Icon(Icons.phone)),
-                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Teléfono', border: OutlineInputBorder()),
                 onSaved: (v) => _telefono = v!,
-                validator: (v) => v!.isEmpty ? 'Requerido' : null,
               ),
               const SizedBox(height: 10),
               TextFormField(
-                decoration: const InputDecoration(labelText: 'Dirección', border: OutlineInputBorder(), prefixIcon: Icon(Icons.home)),
-                maxLines: 2,
+                decoration: const InputDecoration(labelText: 'Dirección', border: OutlineInputBorder()),
                 onSaved: (v) => _direccion = v!,
               ),
               
-              const SizedBox(height: 25),
-              const Divider(thickness: 2),
+              const Divider(height: 30, thickness: 2),
+              const Text('Signos Vitales y Triage', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               
-              const Text(
-                'Signos Vitales y Motivo',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo),
-              ),
-              const SizedBox(height: 10),
-
               TextFormField(
-                decoration: const InputDecoration(
-                  labelText: 'Motivo de Ingreso', 
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.medical_services)
-                ),
+                decoration: const InputDecoration(labelText: 'Motivo de Consulta', border: OutlineInputBorder()),
                 maxLines: 2,
                 onSaved: (v) => _motivoConsulta = v!,
                 validator: (v) => v!.isEmpty ? 'Requerido' : null,
               ),
-              
-              const SizedBox(height: 15),
-              
-              // SIGNOS VITALES (FILAS DE 3)
+              const SizedBox(height: 10),
               Row(
                 children: [
-                  Expanded(child: TextFormField(
-                    decoration: const InputDecoration(labelText: 'F.C. (lpm)', border: OutlineInputBorder()),
-                    keyboardType: TextInputType.number,
-                    onSaved: (v) => _frecuenciaCardiaca = v!,
-                  )),
+                  Expanded(child: TextFormField(decoration: const InputDecoration(labelText: 'FC (lpm)'), keyboardType: TextInputType.number, onSaved: (v) => _frecuenciaCardiaca = v!)),
                   const SizedBox(width: 10),
-                  Expanded(child: TextFormField(
-                    decoration: const InputDecoration(labelText: 'Temp (°C)', border: OutlineInputBorder()),
-                    keyboardType: TextInputType.number,
-                    onSaved: (v) => _temperatura = v!,
-                  )),
-                  const SizedBox(width: 10),
-                  Expanded(child: TextFormField(
-                    decoration: const InputDecoration(labelText: 'SpO2 (%)', border: OutlineInputBorder()),
-                    keyboardType: TextInputType.number,
-                    onSaved: (v) => _saturacionOxigeno = v!,
-                  )),
+                  Expanded(child: TextFormField(decoration: const InputDecoration(labelText: 'FR (rpm)'), keyboardType: TextInputType.number, onSaved: (v) => _frecuenciaRespiratoria = v!)),
                 ],
               ),
-              const SizedBox(height: 10),
-               Row(
+              Row(
                 children: [
-                  Expanded(child: TextFormField(
-                    decoration: const InputDecoration(labelText: 'F.R. (rpm)', border: OutlineInputBorder()),
-                    keyboardType: TextInputType.number,
-                    onSaved: (v) => _frecuenciaRespiratoria = v!,
-                  )),
+                  Expanded(child: TextFormField(decoration: const InputDecoration(labelText: 'Temp (°C)'), keyboardType: TextInputType.number, onSaved: (v) => _temperatura = v!)),
                   const SizedBox(width: 10),
-                  Expanded(child: TextFormField(
-                    decoration: const InputDecoration(labelText: 'Peso (kg)', border: OutlineInputBorder()),
-                    keyboardType: TextInputType.number,
-                    onSaved: (v) => _peso = v!,
-                  )),
-                   const SizedBox(width: 10),
-                  Expanded(child: TextFormField(
-                    decoration: const InputDecoration(labelText: 'Talla (cm)', border: OutlineInputBorder()),
-                    keyboardType: TextInputType.number,
-                    onSaved: (v) => _talla = v!,
-                  )),
+                  Expanded(child: TextFormField(decoration: const InputDecoration(labelText: 'SpO2 (%)'), keyboardType: TextInputType.number, onSaved: (v) => _saturacionOxigeno = v!)),
                 ],
               ),
-
-              const SizedBox(height: 30),
-              ElevatedButton.icon(
-                onPressed: _submitForm,
-                icon: const Icon(Icons.save),
-                label: const Text('GUARDAR Y LIBERAR'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.indigo,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
-                ),
+              Row(
+                children: [
+                  Expanded(child: TextFormField(decoration: const InputDecoration(labelText: 'Peso (kg)'), keyboardType: TextInputType.number, onSaved: (v) => _peso = v!)),
+                  const SizedBox(width: 10),
+                  Expanded(child: TextFormField(decoration: const InputDecoration(labelText: 'Talla (cm)'), keyboardType: TextInputType.number, onSaved: (v) => _talla = v!)),
+                ],
               ),
+              const SizedBox(height: 20),
+              
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _isLoading ? null : _submitForm,
+                  icon: _isLoading ? const SizedBox() : const Icon(Icons.save),
+                  label: _isLoading ? const CircularProgressIndicator(color: Colors.white) : const Text('GUARDAR EN BASE DE DATOS'),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white, padding: const EdgeInsets.all(15)),
+                ),
+              )
             ],
           ),
         ),
