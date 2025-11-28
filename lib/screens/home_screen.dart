@@ -549,12 +549,12 @@ class _AdminManagementScreenState extends State<AdminManagementScreen> with Sing
       padding: const EdgeInsets.only(bottom: 15.0),
       child: DropdownButtonFormField<String>(
         decoration: InputDecoration(
-          labelText: label + ' *',
+          labelText: '$label *',
           prefixIcon: Icon(icon, color: Colors.grey),
           border: const OutlineInputBorder(),
           contentPadding: const EdgeInsets.symmetric(vertical: 15, horizontal: 10),
         ),
-        value: controller.text.isNotEmpty && options.contains(controller.text) ? controller.text : options.first,
+        initialValue: controller.text.isNotEmpty && options.contains(controller.text) ? controller.text : options.first,
         items: options.map((String value) {
           return DropdownMenuItem<String>(
             value: value,

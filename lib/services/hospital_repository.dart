@@ -4,74 +4,131 @@ import 'db_service.dart';
 class HospitalRepository {
   final DbService _dbService = DbService();
 
-  // --- 1. ENFERMERA: REGISTRAR INGRESO (Sin cambios, funciona bien) ---
+  // --- 1. ENFERMERA: REGISTRAR INGRESO (CON SOPORTE PARA LABORATORIO) ---
+  // (Este método se queda exactamente igual a como lo tenías)
   Future<void> registrarIngreso(Map<String, dynamic> datos) async {
     final conn = await _dbService.getConnection();
+    
     await conn.runTx((session) async {
-      // A. Insertar Paciente
-      final resultPaciente = await session.execute(
-        Sql.named("""
-          INSERT INTO pacientes (nombre, apellido_paterno, fecha_nacimiento, genero, curp, contacto_telefono, direccion_completa)
-          VALUES (@nombre, @apellido, @nacimiento, @genero, @curp, @tel, @dir)
-          RETURNING id_paciente
-        """),
-        parameters: {
-          'nombre': datos['nombre'],
-          'apellido': datos['apellido'],
-          'nacimiento': DateTime.parse(datos['fecha_nacimiento']),
-          'genero': datos['genero'],
-          'curp': datos['curp'],
-          'tel': datos['telefono'],
-          'dir': datos['direccion'],
-        },
+      // PASO A: Insertar o reutilizar Paciente
+      final resultBusqueda = await session.execute(
+        Sql.named("SELECT id_paciente FROM pacientes WHERE curp = @curp"),
+        parameters: {'curp': datos['curp']},
       );
-      final idPaciente = resultPaciente[0][0] as int;
 
-      // B. Insertar Episodio
+      int idPaciente;
+
+      if (resultBusqueda.isNotEmpty) {
+        idPaciente = resultBusqueda.first[0] as int;
+      } else {
+        final resultInsertPaciente = await session.execute(
+          Sql.named("""
+            INSERT INTO pacientes (nombre, apellido_paterno, fecha_nacimiento, genero, curp, contacto_telefono, direccion_completa)
+            VALUES (@nombre, @apellido, @nacimiento, @genero, @curp, @tel, @dir)
+            RETURNING id_paciente
+          """),
+          parameters: {
+            'nombre': datos['nombre'],
+            'apellido': datos['apellido'],
+            'nacimiento': DateTime.parse(datos['fecha_nacimiento']),
+            'genero': datos['genero'],
+            'curp': datos['curp'],
+            'tel': datos['telefono'],
+            'dir': datos['direccion'],
+          },
+        );
+        idPaciente = resultInsertPaciente[0][0] as int;
+      }
+
+      // PASO B: Insertar Episodio Médico
+      final tipoEpisodio = (datos['tipo_servicio'] == 'Estudio') ? 'Laboratorio' : 'Urgencia';
+
       final resultEpisodio = await session.execute(
         Sql.named("""
           INSERT INTO episodios_medicos (id_paciente, fecha_ingreso, motivo_ingreso, tipo_episodio)
-          VALUES (@idPac, @fecha, @motivo, 'Urgencia')
+          VALUES (@idPac, @fecha, @motivo, @tipo)
           RETURNING id_episodio
         """),
-        parameters: {'idPac': idPaciente, 'fecha': DateTime.now(), 'motivo': datos['motivo']},
+        parameters: {
+          'idPac': idPaciente,
+          'fecha': DateTime.now(),
+          'motivo': datos['motivo'],
+          'tipo': tipoEpisodio,
+        },
       );
       final idEpisodio = resultEpisodio[0][0] as int;
 
-      // C. Insertar Signos Vitales
-      await session.execute(
-        Sql.named("""
-          INSERT INTO evaluacion_enfermeria (id_episodio, id_usuario_enfermero, peso_kg, talla_cm, temperatura, frecuencia_cardiaca, saturacion_oxigeno, fecha_registro)
-          VALUES (@idEpisodio, 1, @peso, @talla, @temp, @fc, @spo2, @fecha)
-        """),
-        parameters: {
-          'idEpisodio': idEpisodio,
-          'peso': double.tryParse(datos['peso'].toString()) ?? 0.0,
-          'talla': double.tryParse(datos['talla'].toString()) ?? 0.0,
-          'temp': double.tryParse(datos['temp'].toString()) ?? 0.0,
-          'fc': int.tryParse(datos['fc'].toString()) ?? 0,
-          'spo2': int.tryParse(datos['spo2'].toString()) ?? 0,
-          'fecha': DateTime.now(),
-        },
-      );
+      // PASO C: Insertar Datos Específicos (SWITCH)
+      if (datos['tipo_servicio'] == 'Estudio') {
+        // CASO 1: LABORATORIO
+        final estudiosPosibles = {
+          'glucosa': 'Glucosa (mg/dL)',
+          'urea': 'Urea (mg/dL)',
+          'creatinina': 'Creatinina (mg/dL)',
+          'acido_urico': 'Ácido Úrico (mg/dL)',
+          'colesterol': 'Colesterol (mg/dL)',
+          'trigliceridos': 'Triglicéridos (mg/dL)',
+        };
+
+        for (var entry in estudiosPosibles.entries) {
+          String keyFormulario = entry.key;
+          String nombreEstudioDb = entry.value;
+          var valor = datos[keyFormulario];
+
+          if (valor != null && valor.toString().trim().isNotEmpty) {
+             await session.execute(
+              Sql.named("""
+                INSERT INTO resultados_lab (
+                  id_episodio, nombre_estudio, valor_resultado, fecha_toma, documento_enlace
+                ) VALUES (@idEp, @nombre, @valor, CURRENT_DATE, @obs)
+              """),
+              parameters: {
+                'idEp': idEpisodio,
+                'nombre': nombreEstudioDb,
+                'valor': valor.toString(),
+                'obs': datos['observaciones'] ?? '',
+              },
+            );
+          }
+        }
+      } else {
+        // CASO 2: CONSULTA NORMAL (Signos Vitales)
+        await session.execute(
+          Sql.named("""
+            INSERT INTO evaluacion_enfermeria (
+              id_episodio, id_usuario_enfermero, peso_kg, talla_cm, temperatura, frecuencia_cardiaca, saturacion_oxigeno, fecha_registro
+            )
+            VALUES (@idEp, 1, @peso, @talla, @temp, @fc, @spo2, @fecha)
+          """),
+          parameters: {
+            'idEp': idEpisodio,
+            'peso': double.tryParse(datos['peso'].toString()) ?? 0.0,
+            'talla': double.tryParse(datos['talla'].toString()) ?? 0.0,
+            'temp': double.tryParse(datos['temp'].toString()) ?? 0.0,
+            'fc': int.tryParse(datos['fc'].toString()) ?? 0,
+            'spo2': int.tryParse(datos['spo2'].toString()) ?? 0,
+            'fecha': DateTime.now(),
+          },
+        );
+      }
     });
   }
 
-  // --- 2. DOCTOR: BUSCAR EXPEDIENTE REAL EN BD ---
+  // --- 2. DOCTOR: BUSCAR EXPEDIENTE (Actualizado con Labs y Procedimientos) ---
   Future<Map<String, dynamic>?> buscarExpedienteCompleto(String curp) async {
     final conn = await _dbService.getConnection();
 
-    // A. Datos del Paciente y Episodio Actual
+    // A. Buscar Paciente y Episodio Actual
     final resultPaciente = await conn.execute(
       Sql.named("""
         SELECT 
           p.nombre, p.apellido_paterno, p.fecha_nacimiento, p.genero, p.curp, p.contacto_telefono,
-          e.id_episodio, e.motivo_ingreso,
+          e.id_episodio, e.motivo_ingreso, e.tipo_episodio,
           ev.frecuencia_cardiaca, ev.temperatura, ev.saturacion_oxigeno, ev.peso_kg, ev.talla_cm,
           p.id_paciente
         FROM pacientes p
         JOIN episodios_medicos e ON p.id_paciente = e.id_paciente
-        JOIN evaluacion_enfermeria ev ON e.id_episodio = ev.id_episodio
+        LEFT JOIN evaluacion_enfermeria ev ON e.id_episodio = ev.id_episodio
         WHERE p.curp = @curp
         ORDER BY e.fecha_ingreso DESC
         LIMIT 1
@@ -82,47 +139,53 @@ class HospitalRepository {
     if (resultPaciente.isEmpty) return null;
 
     final row = resultPaciente.first;
-    final int idPaciente = row[13] as int;
+    final int idPaciente = row[14] as int;
     final int idEpisodioActual = row[6] as int;
     final fechaNac = row[2] as DateTime;
     final edad = DateTime.now().year - fechaNac.year;
 
-    // B. Buscar Alergias Reales
+    // B. Alergias
     final resultAlergias = await conn.execute(
       Sql.named("SELECT agente_alergico FROM alergias WHERE id_paciente = @id"),
       parameters: {'id': idPaciente}
     );
     final alergiasList = resultAlergias.map((r) => r[0] as String).toList();
 
-    // C. HISTORIAL REAL (Lo que ya se guardó en visitas pasadas)
-    final resultHistorial = await conn.execute(
-      Sql.named("""
-        SELECT 
-          e.fecha_ingreso, 
-          COALESCE(e.diagnostico_principal, 'Sin diagnóstico') as dx,
-          STRING_AGG(m.nombre_medicamento || ' (' || m.dosis || ')', ', ') as receta_resumen
-        FROM episodios_medicos e
-        LEFT JOIN medicamentos m ON e.id_episodio = m.id_episodio
-        WHERE e.id_paciente = @id AND e.id_episodio != @actual
-        GROUP BY e.id_episodio, e.fecha_ingreso, e.diagnostico_principal
-        ORDER BY e.fecha_ingreso DESC
-      """),
-      parameters: {'id': idPaciente, 'actual': idEpisodioActual}
-    );
-
-    final historialList = resultHistorial.map((r) => {
-      'fecha': r[0].toString().split(' ')[0],
-      'diagnostico': r[1],
-      'receta': r[2] ?? 'Sin medicamentos'
-    }).toList();
-
-    // D. Cargar BORRADOR del episodio actual (si el doctor ya guardó algo hoy)
-    // Diagnóstico Borrador
-    final resultDxActual = await conn.execute(
-      Sql.named("SELECT nombre_diagnostico, codigo_cie, estado_diagnostico FROM diagnosticos WHERE id_episodio = @id LIMIT 1"),
+    // C. Resultados de Laboratorio
+    final resultLabs = await conn.execute(
+      Sql.named("SELECT nombre_estudio, valor_resultado FROM resultados_lab WHERE id_episodio = @id"),
       parameters: {'id': idEpisodioActual}
     );
+    final laboratoriosList = resultLabs.map((r) => "${r[0]}: ${r[1]}").toList();
+
+    // D. Historial
+    final resultHistorial = await conn.execute(
+      Sql.named("""
+        SELECT d.nombre_diagnostico, d.fecha_deteccion, d.estado_diagnostico
+        FROM diagnosticos d
+        JOIN episodios_medicos e ON d.id_episodio = e.id_episodio
+        WHERE e.id_paciente = @id
+        ORDER BY d.fecha_deteccion DESC
+      """),
+      parameters: {'id': idPaciente} 
+    );
+
+    final historialList = resultHistorial.map((r) {
+      String fechaStr = '---';
+      if (r[1] != null) fechaStr = r[1].toString().split(' ')[0]; 
+      return {
+        'fecha': fechaStr,
+        'diagnostico': "${r[0]} (${r[2] ?? 'Presuntivo'})", 
+        'receta': null 
+      };
+    }).toList();
+
+    // E. Datos actuales (Diagnóstico, Meds y Procedimientos)
     Map<String, dynamic> dxActual = {};
+    final resultDxActual = await conn.execute(
+      Sql.named("SELECT nombre_diagnostico, codigo_cie, estado_diagnostico FROM diagnosticos WHERE id_episodio = @id ORDER BY id_diagnostico DESC LIMIT 1"),
+      parameters: {'id': idEpisodioActual}
+    );
     if (resultDxActual.isNotEmpty) {
       dxActual = {
         'nombre': resultDxActual.first[0],
@@ -131,11 +194,11 @@ class HospitalRepository {
       };
     }
 
-    // Medicamentos Borrador
     final resultMedsActual = await conn.execute(
       Sql.named("SELECT nombre_medicamento, dosis, frecuencia, fecha_inicio, fecha_fin FROM medicamentos WHERE id_episodio = @id"),
       parameters: {'id': idEpisodioActual}
     );
+    
     final medsActualList = resultMedsActual.map((r) {
       String duracion = '';
       if (r[4] != null && r[3] != null) {
@@ -151,6 +214,26 @@ class HospitalRepository {
       };
     }).toList();
 
+    // 🟢 F. Recuperar Procedimientos Actuales
+    final resultProcsActual = await conn.execute(
+      Sql.named("""
+        SELECT nombre_procedimiento, codigo_cups, fecha_procedimiento, descripcion_detallada, tipo_procedimiento
+        FROM procedimientos
+        WHERE id_episodio = @id
+      """),
+      parameters: {'id': idEpisodioActual}
+    );
+
+    final procsActualList = resultProcsActual.map((r) {
+      return {
+        'nombre_procedimiento': r[0],
+        'codigo_cups': r[1],
+        'fecha_procedimiento': r[2], // DateTime o String
+        'descripcion_detallada': r[3],
+        'tipo_procedimiento': r[4],
+      };
+    }).toList();
+
     return {
       'id_episodio': idEpisodioActual,
       'id_paciente': idPaciente,
@@ -161,16 +244,22 @@ class HospitalRepository {
       'telefono': row[5],
       'motivo': row[7],
       'signos': {
-        'fc': row[8], 'temp': row[9], 'spo2': row[10], 'peso': row[11], 'talla': row[12]
+        'fc': row[9] ?? 0, 
+        'temp': row[10] ?? 0.0, 
+        'spo2': row[11] ?? 0, 
+        'peso': row[12] ?? 0.0, 
+        'talla': row[13] ?? 0.0
       },
+      'laboratorios': laboratoriosList, 
       'alergias': alergiasList,
-      'historial': historialList, // Datos pasados
-      'dx_actual': dxActual,      // Datos presentes (si existen)
-      'meds_actual': medsActualList
+      'historial': historialList,
+      'dx_actual': dxActual,
+      'meds_actual': medsActualList,
+      'procs_actual': procsActualList // 🟢 Agregado
     };
   }
 
-  // --- 3. GUARDAR CONSULTA (Actualizar BD) ---
+  // --- 3. GUARDAR CONSULTA (CON PROCEDIMIENTOS) ---
   Future<void> guardarConsulta({
     required int idEpisodio,
     required int idPaciente,
@@ -178,36 +267,100 @@ class HospitalRepository {
     required String cie,
     required String estado,
     required List<Map<String, dynamic>> medicamentos,
+    // 🟢 Nuevo parámetro
+    required List<Map<String, dynamic>> procedimientos, 
   }) async {
     final conn = await _dbService.getConnection();
     await conn.runTx((session) async {
-      
-      // Borramos datos previos DE ESTE EPISODIO para sobrescribir con la versión nueva
-      await session.execute(Sql.named("DELETE FROM diagnosticos WHERE id_episodio = @id"), parameters: {'id': idEpisodio});
-      await session.execute(Sql.named("DELETE FROM medicamentos WHERE id_episodio = @id"), parameters: {'id': idEpisodio});
 
-      // Guardar Diagnóstico Nuevo
-      await session.execute(
-        Sql.named("INSERT INTO diagnosticos (id_episodio, nombre_diagnostico, codigo_cie, estado_diagnostico, fecha_deteccion) VALUES (@id, @nom, @cie, @est, @fecha)"),
-        parameters: {'id': idEpisodio, 'nom': diagnostico, 'cie': cie, 'est': estado, 'fecha': DateTime.now()}
+      // 1. Evitar duplicados de diagnóstico
+      final existente = await session.execute(
+        Sql.named("""
+          SELECT id_diagnostico 
+          FROM diagnosticos
+          WHERE id_episodio = @idEp AND nombre_diagnostico = @nom
+        """),
+        parameters: {'idEp': idEpisodio, 'nom': diagnostico},
       );
 
-      // Actualizar Episodio Principal
+      if (existente.isEmpty) {
+        await session.execute(
+          Sql.named("""
+            INSERT INTO diagnosticos (id_episodio, nombre_diagnostico, codigo_cie, estado_diagnostico, fecha_deteccion)
+            VALUES (@idEp, @nom, @cie, @est, @fecha)
+          """),
+          parameters: {
+            'idEp': idEpisodio,
+            'nom': diagnostico,
+            'cie': cie,
+            'est': estado,
+            'fecha': DateTime.now(),
+          },
+        );
+      }
+
+      // 2. Actualizar episodio
       await session.execute(
-        Sql.named("UPDATE episodios_medicos SET diagnostico_principal = @diag, fecha_egreso = @fecha, id_medico_responsable = 1 WHERE id_episodio = @id"),
-        parameters: {'diag': diagnostico, 'fecha': DateTime.now(), 'id': idEpisodio}
+        Sql.named("""
+          UPDATE episodios_medicos
+          SET diagnostico_principal = @nom, fecha_egreso = @fecha, id_medico_responsable = 1
+          WHERE id_episodio = @idEp
+        """),
+        parameters: {'idEp': idEpisodio, 'nom': diagnostico, 'fecha': DateTime.now()},
       );
 
-      // Guardar Receta Nueva
-      for (var med in medicamentos) {
+      // 3. Reemplazar receta
+      await session.execute(
+        Sql.named("DELETE FROM medicamentos WHERE id_episodio = @idEp"),
+        parameters: {'idEp': idEpisodio},
+      );
+
+      for (final med in medicamentos) {
         DateTime? fechaFin;
         if (med['duracion'] != null && med['duracion'].toString().isNotEmpty) {
-           int dias = int.tryParse(med['duracion'].toString()) ?? 0;
-           if (dias > 0) fechaFin = DateTime.now().add(Duration(days: dias));
+          final dias = int.tryParse(med['duracion'].toString()) ?? 0;
+          if (dias > 0) fechaFin = DateTime.now().add(Duration(days: dias));
         }
+
         await session.execute(
-          Sql.named("INSERT INTO medicamentos (id_episodio, id_paciente, nombre_medicamento, dosis, frecuencia, fecha_inicio, fecha_fin) VALUES (@idEp, @idPac, @nom, @dos, @frec, @fechaIni, @fechaFin)"),
-          parameters: {'idEp': idEpisodio, 'idPac': idPaciente, 'nom': med['nombre'], 'dos': med['dosis'], 'frec': med['frecuencia'], 'fechaIni': DateTime.now(), 'fechaFin': fechaFin}
+          Sql.named("""
+            INSERT INTO medicamentos (id_episodio, id_paciente, nombre_medicamento, dosis, frecuencia, fecha_inicio, fecha_fin) 
+            VALUES (@idEp, @idPac, @nom, @dos, @freq, @ini, @fin)
+          """),
+          parameters: {
+            'idEp': idEpisodio,
+            'idPac': idPaciente,
+            'nom': med['nombre'],
+            'dos': med['dosis'],
+            'freq': med['frecuencia'],
+            'ini': DateTime.now(),
+            'fin': fechaFin,
+          },
+        );
+      }
+
+      // 🟢 4. Reemplazar Procedimientos
+      await session.execute(
+        Sql.named("DELETE FROM procedimientos WHERE id_episodio = @idEp"),
+        parameters: {'idEp': idEpisodio},
+      );
+
+      for (final proc in procedimientos) {
+        await session.execute(
+          Sql.named("""
+            INSERT INTO procedimientos (
+              id_episodio, nombre_procedimiento, codigo_cups, 
+              fecha_procedimiento, descripcion_detallada, tipo_procedimiento
+            ) VALUES (@idEp, @nombre, @cups, @fecha, @desc, @tipo)
+          """),
+          parameters: {
+            'idEp': idEpisodio,
+            'nombre': proc['nombre_procedimiento'],
+            'cups': proc['codigo_cups'] ?? '',
+            'fecha': proc['fecha_procedimiento'],
+            'desc': proc['descripcion_detallada'] ?? '',
+            'tipo': proc['tipo_procedimiento'] ?? 'Diagnóstico',
+          },
         );
       }
     });
