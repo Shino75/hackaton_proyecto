@@ -2,22 +2,21 @@ class User {
   final int id;
   final String email;
   final String nombre;
+  final String apellidoPaterno;
+  final String apellidoMaterno;
   final String rol;
 
   User({
     required this.id,
     required this.email,
     required this.nombre,
+    required this.apellidoPaterno,
+    required this.apellidoMaterno,
     required this.rol,
   });
 
-  // Convierte los datos que vienen de la Base de Datos (Map) a un objeto User
-  factory User.fromMap(Map<String, dynamic> map) {
-    return User(
-      id: map['id_usuario'] ?? 0,
-      email: map['email'] ?? '',
-      nombre: map['nombre_completo'] ?? '',
-      rol: map['rol'] ?? 'enfermera',
-    );
-  }
+  // Getter útil para la UI:
+  // Si en tu app mostrabas "nombre_completo", usa este getter
+  // para no tener que cambiar todo tu diseño visual.
+  String get nombreCompleto => '$nombre $apellidoPaterno $apellidoMaterno';
 }

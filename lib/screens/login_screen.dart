@@ -1,11 +1,12 @@
-import 'package:flutter/material.dart';
-import '../services/auth_service.dart'; // Tu servicio de conexión
-import '../models/user_model.dart';     // Tu modelo de usuario
+// lib/screens/login_screen.dart
 
-// Importamos las pantallas que YA existen en el proyecto
-import 'paciente_form_screen.dart';     // Para Enfermería
-import 'doctor_search_screen.dart';     // Para Doctor (Búsqueda)
-import 'home_screen.dart';              // Para Admin (O por defecto)
+import 'package:flutter/material.dart';
+import '../services/auth_service.dart'; 
+import '../models/user_model.dart'; 
+
+import 'paciente_form_screen.dart'; 
+import 'doctor_search_screen.dart'; 
+import 'home_screen.dart'; // <--- Usamos HomeScreen como fallback
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -28,7 +29,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() => _isLoading = true);
 
-    // Verificamos credenciales en tu BD real
     User? user = await _authService.login(
       _emailController.text.trim(), 
       _passController.text.trim()
@@ -37,36 +37,20 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = false);
 
     if (user != null && mounted) {
-      // --- TU TRABAJO TERMINA AQUÍ: REDIRIGIR ---
-      
       if (user.rol == 'enfermera') {
-        // Redirige a la pantalla de Enfermería que ya tienen
-        Navigator.pushReplacement(
-          context, 
-          MaterialPageRoute(builder: (_) => const PacienteFormScreen())
-        );
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const PacienteFormScreen()));
       } 
       else if (user.rol == 'doctor') {
-        // Redirige a la pantalla de Búsqueda del Doctor que ya tienen
-        Navigator.pushReplacement(
-          context, 
-          MaterialPageRoute(builder: (_) => const DoctorSearchScreen())
-        );
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const DoctorSearchScreen()));
       } 
       else {
-        // Si es Admin u otro, lo mandamos al menú general
-        Navigator.pushReplacement(
-          context, 
-          MaterialPageRoute(builder: (_) => const AdminManagementScreen())
-        );
+        // Redirigimos a HomeScreen si es admin o desconocido
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AdminManagementScreen()));
       }
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Credenciales incorrectas"), 
-            backgroundColor: Colors.red
-          ),
+          const SnackBar(content: Text("Credenciales incorrectas"), backgroundColor: Colors.red),
         );
       }
     }
@@ -85,45 +69,14 @@ class _LoginScreenState extends State<LoginScreen> {
               const Icon(Icons.local_hospital, size: 90, color: Colors.indigo),
               const SizedBox(height: 20),
               const Text("Acceso Seguro", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.indigo)),
-              const SizedBox(height: 10),
-              const Text("Sistema Hospitalario TESI"),
               const SizedBox(height: 40),
-              
-              TextField(
-                controller: _emailController,
-                decoration: const InputDecoration(
-                  labelText: "Correo Electrónico",
-                  prefixIcon: Icon(Icons.email),
-                  border: OutlineInputBorder(),
-                ),
-              ),
+              TextField(controller: _emailController, decoration: const InputDecoration(labelText: "Correo", prefixIcon: Icon(Icons.email), border: OutlineInputBorder())),
               const SizedBox(height: 20),
-              
-              TextField(
-                controller: _passController,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: "Contraseña",
-                  prefixIcon: Icon(Icons.lock),
-                  border: OutlineInputBorder(),
-                ),
-              ),
+              TextField(controller: _passController, obscureText: true, decoration: const InputDecoration(labelText: "Contraseña", prefixIcon: Icon(Icons.lock), border: OutlineInputBorder())),
               const SizedBox(height: 30),
-
               _isLoading 
                 ? const CircularProgressIndicator()
-                : SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: ElevatedButton(
-                      onPressed: _handleLogin,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.indigo,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: const Text("INGRESAR", style: TextStyle(fontSize: 18)),
-                    ),
-                  ),
+                : SizedBox(width: double.infinity, height: 50, child: ElevatedButton(onPressed: _handleLogin, style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white), child: const Text("INGRESAR", style: TextStyle(fontSize: 18)))),
             ],
           ),
         ),

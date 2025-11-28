@@ -1,4 +1,4 @@
-import 'package:postgres/postgres.dart'; // Importante importar esto
+import 'package:postgres/postgres.dart';
 import '../models/user_model.dart';
 import 'db_service.dart';
 
@@ -9,25 +9,39 @@ class AuthService {
     try {
       final connection = await _dbService.getConnection();
 
-      // NUEVA SINTAXIS DE CONSULTA (v3)
-      // Usamos Sql.named para pasar parámetros con @
+      // ACTUALIZACIÓN:
+      // 1. Cambiamos 'nombre_completo' por 'nombre', 'apellido_paterno', 'apellido_materno'.
+      // 2. Mantenemos la seguridad usando parámetros con @ (Sql.named).
       final Result result = await connection.execute(
-        Sql.named('SELECT id_usuario, email, nombre_completo, rol FROM usuarios WHERE email = @email AND password_hash = @password'),
+        Sql.named('''
+          SELECT 
+            id_usuario, 
+            email, 
+            nombre, 
+            apellido_paterno, 
+            apellido_materno, 
+            rol 
+          FROM usuarios 
+          WHERE email = @email AND password_hash = @password
+        '''),
         parameters: {
           'email': email,
-          'password': password, 
+          'password': password,
         },
       );
 
       if (result.isNotEmpty) {
-        // En la v3, accedemos a la primera fila (row) así:
         final row = result.first;
         
+        // ACTUALIZACIÓN DEL MAPEO:
+        // Los índices cambian porque agregamos columnas al SELECT.
         return User(
           id: row[0] as int,
           email: row[1] as String,
-          nombre: row[2] as String,
-          rol: row[3] as String,
+          nombre: row[2] as String,           // Antes era nombre_completo
+          apellidoPaterno: row[3] as String,  // Nuevo campo
+          apellidoMaterno: row[4] as String,  // Nuevo campo
+          rol: row[5] as String,              // Se desplazó al índice 5
         );
       }
       return null;
